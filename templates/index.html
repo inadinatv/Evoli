@@ -1,0 +1,86 @@
+<!DOCTYPE html><html lang="tr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FilmBot Katalog</title><style>
+:root{--bg:#0b0b10;--card:#171722;--acc:#e50914;--txt:#eee}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif}
+header{position:sticky;top:0;z-index:20;background:rgba(11,11,16,.95);
+       backdrop-filter:blur(10px);padding:12px 14px;border-bottom:1px solid #23232f}
+.top{display:flex;gap:10px;align-items:center}
+.top h1{font-size:18px;white-space:nowrap}.top h1 span{color:var(--acc)}
+#q{flex:1;background:#1c1c28;border:1px solid #2c2c3a;color:#fff;
+   padding:9px 12px;border-radius:20px;outline:none;font-size:14px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-top:10px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{background:#1c1c28;border:1px solid #2c2c3a;padding:6px 14px;
+      border-radius:16px;font-size:12px;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--acc);border-color:var(--acc);font-weight:700}
+.count{padding:10px 16px 0;font-size:12px;color:#888}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+      gap:12px;padding:14px}
+.card{background:var(--card);border-radius:10px;overflow:hidden;
+      cursor:pointer;transition:transform .18s}
+.card:hover{transform:scale(1.04)}
+.card img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#222}
+.card .t{padding:8px;font-size:12px;line-height:1.35;display:-webkit-box;
+         -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:50;
+       display:flex;align-items:center;justify-content:center;padding:12px}
+.hidden{display:none}
+.box{width:100%;max-width:860px;background:#101018;border-radius:12px;
+     overflow:hidden;border:1px solid #2a2a38}
+.mhead{display:flex;justify-content:space-between;align-items:center;padding:10px 14px}
+.mhead h2{font-size:15px}
+#mclose{background:none;border:none;color:#fff;font-size:20px;cursor:pointer}
+video{width:100%;max-height:60vh;background:#000}
+.mtags{padding:8px 14px;display:flex;gap:6px;flex-wrap:wrap}
+.mtags span{background:#1c1c28;font-size:11px;padding:4px 10px;border-radius:12px;color:#bbb}
+.mbtns{padding:0 14px 14px;display:flex;gap:8px}
+.mbtns button,.mbtns a{flex:1;background:#1c1c28;border:1px solid #2c2c3a;color:#fff;
+  padding:9px;border-radius:8px;font-size:13px;cursor:pointer;text-align:center;
+  text-decoration:none}
+</style></head><body>
+<header><div class="top"><h1>🎬 Film<span>Bot</span></h1>
+<input id="q" placeholder="Film ara..."></div>
+<div id="cats" class="chips"></div></header>
+<div id="count" class="count"></div>
+<main id="grid" class="grid"></main>
+<div id="modal" class="modal hidden"><div class="box">
+<div class="mhead"><h2 id="mtitle"></h2><button id="mclose">✕</button></div>
+<video id="player" controls playsinline></video>
+<div id="mtags" class="mtags"></div>
+<div class="mbtns"><button id="copym3u">📋 M3U Linkini Kopyala</button>
+<a id="dl">⬇️ MP4 İndir</a></div>
+</div></div>
+<script>
+const FILMS=__FILMS__;const UA="__UA__";const RF="__REF__";
+let curCat="Tümü",curQ="",curFilm=null;
+const counts={};FILMS.forEach(f=>(f.categories||[]).forEach(c=>counts[c]=(counts[c]||0)+1));
+const cats=["Tümü",...Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(e=>e[0])];
+const esc=s=>s.replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+function chips(){document.getElementById('cats').innerHTML=
+  cats.map(c=>`<div class="chip ${c===curCat?'on':''}" onclick="setCat('${esc(c)}')">${esc(c)}${c!=='Tümü'?' ('+counts[c]+')':''}</div>`).join('')}
+function setCat(c){curCat=c;chips();render()}
+function render(){const g=document.getElementById('grid');
+  const list=FILMS.filter(f=>(curCat==="Tümü"||(f.categories||[]).includes(curCat))
+    &&f.title.toLowerCase().includes(curQ));
+  document.getElementById('count').textContent=
+    list.length+" film (kitaplık: "+FILMS.length+", güncelleme: "+(FILMS.length?FILMS[0].added||"":"-")+")";
+  g.innerHTML=list.map(f=>`<div class="card" onclick="ac('${f.id}')"><img loading="lazy"
+    src="/poster/${f.id}" onerror="this.onerror=null;this.src='${f.poster}'">
+    <div class="t">${esc(f.title)}</div></div>`).join('')}
+function ac(id){curFilm=FILMS.find(f=>f.id===id);if(!curFilm)return;
+  document.getElementById('mtitle').textContent=curFilm.title;
+  document.getElementById('mtags').innerHTML=(curFilm.categories||[]).map(c=>`<span>${esc(c)}</span>`).join('');
+  const p=document.getElementById('player');p.src='/stream/'+id;
+  document.getElementById('dl').href='/stream/'+id;document.getElementById('dl').download=curFilm.id+'.mp4';
+  document.getElementById('modal').classList.remove('hidden');p.play();}
+document.getElementById('mclose').onclick=()=>{const p=document.getElementById('player');
+  p.pause();p.src='';document.getElementById('modal').classList.add('hidden')};
+document.getElementById('copym3u').onclick=()=>{if(curFilm){
+  const line=curFilm.stream+"|User-Agent="+UA+"|Referer="+RF;
+  navigator.clipboard?navigator.clipboard.writeText(line):prompt("Kopyala:",line);
+  alert("M3U linki kopyalandı!")}};
+document.getElementById('q').oninput=e=>{curQ=e.target.value.toLowerCase().trim();render()};
+chips();render();
+</script></body></html>

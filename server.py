@@ -407,6 +407,28 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(202, {"started": True, "limit": limit, "only_broken": only_broken}, head_only=head_only)
 
     def api_health(self, key: str, head_only: bool):
+        """/api/health -> genel durum; /api/health/<id> -> tek filmin kaynağı."""
+        if not key:
+            db = get_db()
+            films = db.get("films", []) or []
+            verified = sum(1 for f in films if f.get("ok") is True)
+            broken = sum(1 for f in films if f.get("ok") is False)
+            blocked = RESOLVER.blocked_hosts()
+            return self._json(200, {
+                "ok": not blocked,
+                "version": Handler.server_version,
+                "films": len(films),
+                "verified": verified,
+                "broken": broken,
+                "unknown": max(0, len(films) - verified - broken),
+                "categories": len(db.get("categories") or {}),
+                "updated": db.get("updated", ""),
+                "cache_items": len(RESOLVER._cache.get("items", {})),
+                "resolver_stats": dict(RESOLVER.stats),
+                "blocked_hosts": blocked,
+                "hint": ("Sunucu bu ağdan CDN'e ulaşamıyor (VPN/DNS/güvenlik duvarı "
+                         "ya da IP engeli)." if blocked else ""),
+            }, head_only=head_only)
         film = find_film(key)
         if not film:
             return self._json(404, {"ok": False, "error": "film bulunamadı"}, head_only=head_only)

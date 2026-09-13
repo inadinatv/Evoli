@@ -1,96 +1,191 @@
-# 🎬 EVOLI Premium • v5.0
+# 🎬 EVOLI Premium • v6
 
-Sinematik, Netflix seviyesinde premium streaming arayüzü. Otomatik katalog, gelişmiş player, favoriler ve izleme geçmişi ile tam entegre.
+Netflix tarzı arayüz + kendi kendini onaran video kaynağı çözümü + tam arşiv
+taraması. Bu sürümün tek odağı: **kataloğun tamamı bulunsun ve bulunan her
+film oynasın.**
 
-## ✨ Yeni Premium Özellikler (v5)
+---
 
-### 🎥 Sinematik Player
-- **Özel kontroller**: Play/pause, 10sn ileri/geri, ses, tam ekran, sinema modu, PiP
-- **İlerleme çubuğu**: Buffer gösterimi, sürükle-bırak seek, thumb önizleme
-- **Hız kontrolü**: 0.5x - 2x arası oynatma hızı
-- **Klavye kısayolları**: Space, ←/→, ↑/↓, M, F, T, P, N, Esc
-- **Akıllı devam**: Kaldığın yerden otomatik devam, her 5sn'de kayıt
-- **Otomatik sıradaki**: Video bitince sıradaki filme geçiş
-- **Arkaplan blur**: Sinematik backdrop ve glassmorphism
+## ❗ v6'da düzeltilen kök nedenler
 
-### 🎨 Arayüz & Film Menü
-- **Premium tasarım**: Outfit font, gradientler, glow efektleri, micro-animasyonlar
-- **Hero bölümü**: Öne çıkan film, tek tıkla izle
-- **İzlemeye devam et**: Yatay kaydırılabilir geçmiş, progress bar ile
-- **Gelişmiş kartlar**: Hover'da büyütme, play ikonu, NEW/HD rozetleri, favori kalbi, izlenme ilerlemesi
-- **Akıllı kategori menüsü**: Emoji ikonlar, sayılar, sekmeler (Tümü/Favori/Yeni), canlı arama
-- **Sıralama**: En yeni, en eski, A-Z, Z-A, karışık
-- **Favoriler**: LocalStorage, badge sayacı, dışa aktarma
-- **Arama**: Debounce, kategori + başlık, vurgulu chip'ler, temizle butonu
-- **Responsive**: Mobil swipe, bottom sheet player, dokunmatik uyumlu
+| # | Sorun | Eski davranış | Yeni davranış |
+|---|-------|---------------|---------------|
+| 1 | **Bayat Referer** | `config.REFERER` içine sabit yazılmış alan adı CDN'den 403 yiyordu → video hiç açılmıyordu | Her film için *aday Referer listesi*: gömme sayfası → film sayfası → öğrenilen site adresi → config → referer'sız. İlk çalışan kullanılır ve kaydedilir |
+| 2 | **Dönen (rotating) CDN alan adı** | `films.json`'a yazılan `https://cdn…/<id>.mp4` adresi alan adı değişince ölüyordu | Alan adı tarama sırasında öğrenilir (`meta.cdn_host`), tüm eski kayıtlar otomatik yeni alan adına taşınır (`retarget_streams`), eski adres `alt_streams` içinde yedek kalır |
+| 3 | **Tek deneme, yedek yok** | Kaynak 403/404 verirse oynatıcı sadece "video yüklenemedi" diyordu | Sunucu sırayla dener: önbellek → kayıtlı adres (farklı Referer'larla) → CDN şablonları → **film sayfasından canlı yeniden çözüm**. Oyuncu da 3 kez yeniden dener |
+| 4 | **Kategori sayfaları taranmıyordu** | `cat_url.rstrip('/') + 'page/2/'` → `…-opage/2/` (eksik `/`) → kategorilerin 2. sayfasından sonrası hiç bulunamıyordu | Doğru `/page/N/` kurulumu + **sitemap** ve **WordPress REST API** keşfi (tüm arşiv, 2016'dan bugüne) |
+| 5 | **JSON'daki filmlerin hepsi görünmüyordu** | Sadece HTML crawl; tek bir regex (`/pornolar/<id>.html` + `https://…mp4`) | Kaçışlanmış URL'ler (`https:\/\/…`), `file:`/`sources:`/`og:video`/`<source>`/`data-src`, `.m3u8`/`.webm`, iç içe iframe'ler, çoklu id kalıbı |
+| 6 | **Kararsız kimlik** | `str(abs(hash(src)))` — Python her çalıştırmada farklı hash üretir → çift/bozuk kayıtlar | Gömme numarası, yoksa `blake2b` tabanlı deterministik kimlik |
+| 7 | **Aralık (Range) hataları** | `Accept-Ranges: bytes` her zaman gönderiliyordu, Content-Length yoksa tarayıcı yanıtın bittiğini anlayamıyordu, HEAD isteğine gövde yazılıyordu | Range gerçekten destekleniyorsa bildiriliyor; desteklenmiyorsa sunucu 206 + `Content-Range` üretiyor (ileri/geri sarma çalışır), uzunluk bilinmiyorsa `Connection: close`, HEAD'de gövde yok, `Connection: close` yankılanıyor |
+| 8 | **Her istekte 790 KB JSON okuma** | `reload()` her istekte dosyayı baştan okuyordu → oynatma takılıyordu | mtime önbelleği + id/slug indeksi, metin yanıtlarında gzip |
+| 9 | **m3u8 oynatılamıyordu** | HLS kaynak bulunsa bile oynatılamıyordu | Sunucu playlist'i kendi origin'ine yeniden yazar (`/hls/<id>/<n>`), tarayıcıda hls.js devreye girer |
 
-### 🚀 Sunucu İyileştirmeleri
-- `films.json` artık direkt servis ediliyor (eski sürümde 404 veriyordu)
-- CORS desteği, OPTIONS/HEAD
-- Yeni endpointler: `/api/categories`, `/api/stats`, `/api/films?full=1`
-- Güvenli statik dosya servisi, MIME ve cache kontrol
-- Poster için 1 gün cache, video için range desteği
+---
 
-## Kurulum
+## 🚀 Kurulum
 
 ```bash
-git clone https://github.com/KULLANICI/film-bot.git
-cd film-bot
-pip install -r requirements.txt --break-system-packages
+git clone https://github.com/inadinatv/Evoli.git
+cd Evoli
+pip install -r requirements.txt        # sadece requests + urllib3
 ```
 
-## Kullanım
+> Eski sürümden geliyorsan bir kez çalıştır:
+> ```bash
+> python bot.py migrate     # films.json'u yeni şemaya taşır (internet gerekmez)
+> ```
+
+## ▶ Kullanım
 
 ```bash
-python bot.py
+python bot.py            # interaktif menü
+python bot.py server     # sadece sunucu (arayüz + video proxy)
+python bot.py scan       # hızlı güncelleme: yeni filmler
+python bot.py full       # tam arşiv: sitemap'teki tüm filmler
+python bot.py repair     # oynamayan kaynakları yeniden çöz
+python bot.py status     # katalog özeti
+python bot.py auto       # tara + sunucu + 6 saatte bir otomatik tarama
 ```
 
-3 seçenek:
-- **1** — Manuel tarama
-- **2** — Sadece HTML sunucuyu başlat (premium UI)
-- **3** — **FULL OTOMASYON**: İlk tarama + sunucu + her 6 saatte otomatik tarama
+Menü:
 
-Direkt sunucu:
+```
+1) Hızlı Güncelleme      — yeni filmleri ekle (sitemap/REST)
+2) Tam Arşiv Taraması    — sitedeki tüm filmler (uzun sürer)
+3) Sunucuyu Başlat       — premium arayüz + video proxy
+4) Full Otomasyon        — tara + sunucu + zamanlayıcı
+5) Kaynakları Onar       — oynamayan videoları yeniden çöz
+6) Katalog Durumu        — özet + CDN/site bilgisi
+7) Kataloğu Taşı         — eski films.json'u yeni şemaya çevir
+```
+
+## 🔗 Erişim
+
+| Ne | Adres |
+|----|-------|
+| Arayüz | `http://127.0.0.1:8000` |
+| Aynı Wi-Fi'daki cihazlar | `http://<IP>:8000` |
+| Katalog | `/films.json` • `/api/films` • `/api/films?full=1` |
+| Arama/filtre (sunucu tarafı) | `/api/films?q=anne&cat=HD&limit=48&offset=0` |
+| Özet | `/api/stats` • `/api/status` • `/api/meta` |
+| Kaynak çözme | `/api/resolve/<id>?refresh=1&debug=1` |
+| Toplu onarım | `/api/repair?limit=200` • durum: `/api/repair/status` |
+| Tek film sağlık kontrolü | `/api/health/<id>` |
+| Video / afiş | `/stream/<id>` • `/poster/<id>` • HLS: `/hls/<id>/<n>` |
+| M3U (harici oynatıcı) | `/m3u` — UA + Referer gömülü |
+| M3U (proxy, en garantili) | `/playlist_local.m3u` — VLC/TV'de bunu kullan |
+
+## 🧠 Kaynak çözme nasıl çalışıyor?
+
+```
+film (id, url, embed, stream)
+   │
+   ├─ 1. media_cache.json  → daha önce çalıştığı doğrulanmış adres
+   ├─ 2. films.json stream → farklı Referer adaylarıyla (embed → sayfa → site → config → boş)
+   ├─ 3. CDN şablonları    → öğrenilen alan adlarıyla https://{host}/{id}.mp4
+   └─ 4. canlı çözüm       → film sayfası → iframe/gömme → oynatıcı kaynağı (file:/sources/og:video/m3u8)
+                              ↓
+                     ilk çalışan yanıt (200/206, video içerik tipi)
+                              ↓
+                  media_cache.json'a yazılır → sonraki istekler tek atışta
+```
+
+Oynatıcıda bir şey ters giderse ekranda **teşhis paneli** açılır: hangi adayın
+hangi alan adı + Referer ile hangi HTTP durumunu döndürdüğünü gösterir
+(403 = Referer/hotlink, 404 = dosya yok, 0 = ağ erişilemedi).
+
+## ⚙️ Ayarlar (`config.py`)
+
+Tüm ayarlar `EVOLI_<ADI>` ortam değişkeniyle geçersiz kılınabilir
+(ör. `EVOLI_PORT=9000 python bot.py server`).
+
+| Ayar | Varsayılan | Açıklama |
+|------|-----------|----------|
+| `BASE_URL` / `SITE_HOME` | ayna / kanonik adres | Tarama giriş noktası ve film adreslerinin alan adı |
+| `MIRROR_HOSTS` | 3 ayna | Sayfa açılamazsa sırayla denenen aynalar |
+| `CDN_HOSTS` | `cdn.evolliecdnsx.com` | Başlangıç CDN tohumu; yenileri otomatik öğrenilir |
+| `CDN_VIDEO_TEMPLATES` | `{host}/{id}.mp4` … | Video adresi şablonları |
+| `DISCOVERY_MODE` | `auto` | `auto` / `sitemap` / `rest` / `crawl` |
+| `MAX_FILMS_PER_SCAN` | 300 | Hızlı taramada eklenecek yeni film sayısı (0 = sınırsız) |
+| `SCAN_WORKERS` | 8 | Eşzamanlı çözme işçisi |
+| `VERIFY_STREAMS` / `VERIFY_SAMPLE` | `True` / 60 | Taramada kaç kaynak doğrulansın |
+| `EMULATE_RANGE` | `True` | Upstream Range desteklemiyorsa sunucu taklit etsin |
+| `CACHE_TTL_OK` / `CACHE_TTL_FAIL` | 12 saat / 10 dk | Çözüm önbelleği geçerlilik süreleri |
+| `PORT`, `SCAN_INTERVAL_HOURS`, `REQUEST_DELAY` | 8000, 6, 0.15 | — |
+
+## 🧪 Testler
+
+İnternet gerektirmez: `tests/fakesite.py` gerçek sitenin davranışını taklit
+eder (hotlink korumalı CDN, kaçışlanmış JW Player kaynağı, mp4'süz gömme
+sayfası, ölü CDN alan adı, HLS yayını, sitemap + REST + kategori sayfaları).
+
 ```bash
-python server.py
+python -m unittest discover -s tests -t . -v
 ```
 
-## Erişim
+33 test şunları doğrular: keşif (sitemap/REST/crawl + sayfalama düzeltmesi),
+kaynak çıkarma, Referer/CDN yedekleme, aday sırası (önbellek → kayıtlı →
+şablon), erişilemeyen ağda kayıtların bozuk işaretlenmemesi, devre kesici,
+aralık taklidi (206), HEAD, poster, HLS yeniden yazımı, onarım, API uçları,
+çift kayıt engelleme.
 
-- Arayüz: `http://127.0.0.1:8000`
-- Aynı Wi-Fi'daki cihazlar: `http://<IP>:8000`
-- M3U: `http://127.0.0.1:8000/m3u`
-- JSON: `http://127.0.0.1:8000/films.json`
-- API: `http://127.0.0.1:8000/api/films` | `/api/stats` | `/api/categories`
+## 📁 Dosyalar
 
-## Klavye Kısayolları
+```
+bot.py       giriş noktası (menü + CLI + zamanlayıcı)
+config.py    tüm ayarlar (ortam değişkeniyle geçersiz kılınabilir)
+net.py       HTTP katmanı: toleranslı TLS, tekrar deneme, başlık adayları
+extract.py   HTML/XML ayrıştırma: medya, gömme, id, afiş, kategori, sitemap
+resolver.py  ★ çalışan video adresini bulur (çok adaylı, önbellekli, onarım)
+scraper.py   keşif + film çıkarma + doğrulama + katalog/M3U üretimi
+server.py    arayüz, API ve video/afiş/HLS proxy'si
+index.html   premium arayüz + dayanıklı oynatıcı
+tests/       sahte site + uçtan uca testler
+films.json   katalog (üretilir)         media_cache.json  çözüm önbelleği (üretilir, git'e girmez)
+playlist.m3u harici oynatıcı listesi    playlist_local.m3u proxy listesi
+```
+
+## 🩺 Sorun giderme
+
+| Belirti | Çözüm |
+|---------|-------|
+| Hiçbir video oynamıyor | `python bot.py repair` → CDN alan adı/Referer yeniden öğrenilir. Ardından `/api/status` altında `resolver.stats` alanına bak |
+| Bazı videolar oynamıyor | Oyuncudaki **🛠 Kaynakları Onar** düğmesi veya `python bot.py repair` |
+| Teşhis panelinde `403` | Referer sorunu: `config.REFERER`/`meta.referer` bayat. `repair` çalışan refereri bulup `media_cache.json`'a yazar |
+| Teşgis panelinde `0 / bağlanılamadı` | Ağ/VPN/DNS engeli. Kayıtlar "bozuk" işaretlenmez, ağ açılınca kendiliğinden çözülür |
+| Katalog eksik görünüyor | `python bot.py full` (sitemap'ten tüm arşiv) |
+| VLC/TV'de oynatmak istiyorum | `http://127.0.0.1:8000/playlist_local.m3u` (Referer/UA derdi yok) |
+| Arayüz yavaş açılıyor | `films.json` gzip ile servis edilir; büyük katalogda `/api/films?limit=48` kullan |
+
+## 🔁 Bakım / GitHub Actions
+
+Depoda 6 saatte bir çalışan `update.yml` iş akışı var: testleri çalıştırır, tam
+tarama yapar, `films.json` + `playlist.m3u` + `playlist_local.m3u` değiştiyse
+commit eder. Tarama sırasında akış doğrulaması kapatılır (`EVOLI_VERIFY_STREAMS=0`):
+GitHub sunucularının IP'leri çoğu zaman CDN tarafından engellenir ve bu, çalışan
+kayıtları yanlışlıkla "bozuk" gösterebilir. Doğrulama kendi makinende
+`python bot.py repair` ile yapılır.
+
+> **Not:** Güncellenmiş iş akışı bu depoda `docs/ci-update.yml.txt` olarak duruyor.
+> `.github/workflows/` altına yazmak GitHub App'te `workflows` izni gerektirdiği
+> için o değişikliği kendin uygulaman gerekiyor:
+>
+> ```bash
+> cp docs/ci-update.yml.txt .github/workflows/update.yml
+> git add .github/workflows/update.yml
+> git commit -m "ci: run tests, skip stream verification on runner IPs"
+> git push
+> ```
+>
+> (Alternatif: Arena GitHub App'ine repo ayarlarından `Workflows: Read and write`
+> izni verirsen bunu ben de push edebilirim.)
+
+## Klavye kısayolları
 
 | Tuş | İşlev |
 |-----|-------|
 | Space | Oynat / Duraklat |
 | ← / → | 10sn geri / ileri |
 | ↑ / ↓ | Ses aç / kıs |
-| M | Sessize al |
-| F | Tam ekran |
-| T | Sinema modu |
-| P | Mini oynatıcı (PiP) |
-| N | Sonraki film |
+| M / F / T / P / N | Sessiz / Tam ekran / Sinema / PiP / Sonraki |
 | Esc | Kapat |
-
-## Ayarlar (`config.py`)
-
-- `SCAN_INTERVAL_HOURS` → tarama aralığı (6 saat)
-- `PAGES_PER_SCAN` → ana sayfa tarama sayısı
-- `MAX_PAGES_PER_CATEGORY` → kategori başı limit
-- `PORT`, `USER_AGENT`, `REFERER`
-
-## Özellikler
-
-- ✅ Premium sinematik player (custom controls, theater, PiP, hız)
-- ✅ Netflix benzeri katalog + hero + devam et satırı
-- ✅ Kategori filtresi, arama, sıralama, favori, yeni sekmeleri
-- ✅ İzleme geçmişi & favoriler (localStorage)
-- ✅ Benzer filmler, paylaş, kopyala, rastgele, devam et
-- ✅ User-Agent + Referer proxy, range desteği
-- ✅ Otomatik güncelleme, çift kayıt engelleme, M3U gruplama
-- ✅ Tam responsive, klavye ve dokunmatik uyumlu

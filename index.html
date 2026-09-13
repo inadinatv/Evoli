@@ -287,6 +287,21 @@ img{max-width:100%}
   box-shadow:0 12px 40px rgba(0,0,0,.5);z-index:6;transition:.22s var(--ease);opacity:0;pointer-events:none
 }
 .big-play.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+
+/* KAYNAK HATA EKRANI */
+.video-error{position:absolute;inset:0;display:none;place-items:center;background:rgba(6,6,10,.94);z-index:6;padding:22px;text-align:center}
+.video-error.show{display:grid}
+.ve-box{max-width:460px}
+.ve-ico{font-size:36px;line-height:1;margin-bottom:10px}
+.ve-title{font-size:16px;font-weight:700;margin-bottom:6px}
+.ve-msg{font-size:12.5px;color:var(--txt2);line-height:1.65;margin-bottom:14px}
+.ve-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.ve-src{margin-top:12px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--txt3);
+  max-height:110px;overflow:auto;text-align:left;background:rgba(255,255,255,.04);
+  border:1px solid var(--border);border-radius:10px;padding:8px 10px;word-break:break-all}
+.ve-src:empty{display:none}
+.ve-src b{color:var(--txt2);font-weight:600}
+.card-poster img.noimg{opacity:.10;filter:grayscale(1)}
 .big-play:hover{transform:translate(-50%,-50%) scale(1.06);background:#fff}
 
 /* Custom controls */
@@ -545,6 +560,19 @@ img{max-width:100%}
       <div class="video-stage" id="video-stage">
         <video id="player" playsinline preload="metadata" crossorigin="anonymous"></video>
         <div class="video-loader" id="video-loader"><div class="spinner"></div></div>
+        <div class="video-error" id="video-error">
+          <div class="ve-box">
+            <div class="ve-ico">📡</div>
+            <div class="ve-title" id="ve-title">Kaynak bulunamadı</div>
+            <div class="ve-msg" id="ve-msg">Sunucu tüm yedek kaynakları denedi ama oynatılabilir bir video bulamadı.</div>
+            <div class="ve-actions">
+              <button class="h-btn primary" id="ve-retry">↻ Yeniden Dene</button>
+              <button class="h-btn" id="ve-next">⏭ Sıradaki Film</button>
+              <button class="h-btn" id="ve-repair">🛠 Kaynakları Onar</button>
+            </div>
+            <div class="ve-src" id="ve-src"></div>
+          </div>
+        </div>
         <div class="big-play" id="big-play">▶</div>
 
         <!-- CUSTOM CONTROLS -->
@@ -622,6 +650,7 @@ img{max-width:100%}
           <div class="row"><span>Eklenme</span><b id="ps-added">-</b></div>
           <div class="row"><span>Kalite</span><b>HD • 1080p</b></div>
           <div class="row"><span>İzlenme</span><b id="ps-progress">0%</b></div>
+          <div class="row"><span>Kaynak</span><b id="ps-source">-</b></div>
           <div class="row"><span>ID</span><b id="ps-id" style="font-family:JetBrains Mono;font-size:11px">#000</b></div>
         </div>
         <div class="related-head"><span>Benzer Filmler</span><button class="h-btn" id="related-more" style="height:26px;font-size:11px">Tümünü Gör</button></div>
@@ -647,7 +676,10 @@ img{max-width:100%}
 </div>
 
 <script>
-const PROXY = "https://evolixx.burhantasci72.workers.dev/?url=";
+// Media is served by server.py.  Keeping the request on the same origin avoids
+// third-party proxy outages and lets the server add the upstream's required
+// Referer, User-Agent and byte-range headers.
+const MEDIA_PROXY = /^https?:$/.test(location.protocol) ? location.origin : "";
 const VIDEOS_PER_PAGE = 48;
 const STORAGE_FAV = "evoli_favs_v2";
 const STORAGE_HIST = "evoli_hist_v2";
@@ -661,7 +693,13 @@ let favorites = new Set(), historyMap = {}, menuTab = "all";
 let theater = false, autoHideTimer = null, isDragging = false;
 let nextFilmId = null;
 
-function px(u){ return PROXY ? PROXY + encodeURIComponent(u) : u; }
+function mediaUrl(film, kind){
+  const source = kind === 'stream' ? film.stream : film.poster;
+  return MEDIA_PROXY && film.id ? `${MEDIA_PROXY}/${kind}/${encodeURIComponent(film.id)}` : source;
+}
+function posterFallbacks(film){
+  return [film.poster, film.poster_alt].filter(u=> u && /^https?:/i.test(u));
+}
 function esc(s){ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function toast(msg, acc=false){
   const old = document.querySelector('.toast'); if(old) old.remove();
@@ -688,7 +726,16 @@ function fmtTime(s){
   if(m>=60){ const h=Math.floor(m/60); return `${h}:${String(m%60).padStart(2,'0')}:${String(sc).padStart(2,'0')}`; }
   return `${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')}`;
 }
-function isNew(f){ return f.added && (Date.now()-new Date(f.added).getTime()) < 7*24*3600*1000; }
+function parseDate(v){
+  if(!v) return NaN;
+  const t = new Date(String(v).trim().replace(' ','T')).getTime();
+  return isNaN(t) ? NaN : t;
+}
+function filmDate(f){ return f.date || f.added || ''; }
+function isNew(f){
+  const t = parseDate(filmDate(f));
+  return !isNaN(t) && (Date.now()-t) < 7*24*3600*1000;
+}
 function catIcon(c){
   const map={"Türk":"🇹🇷","HD":"💎","Amatör":"🎥","Anal":"🔥","Sarışın":"👱‍♀️","Esmer":"👩","Rus":"🇷🇺","Milf":"👠","Teen":"🌸","Grup":"👥","Lezbiyen":"💋","Ensest":"🚫","Konulu":"🎬","Sert":"⚡","Zenci":"🌑","Asyalı":"🌸","Olgun":"🍷","Türbanlı":"🧕","Japon":"🇯🇵"};
   return map[c]||"•";
@@ -721,7 +768,10 @@ function renderHero(){
   const hero = document.getElementById('hero');
   if(!ALL_FILMS.length) return;
   const f = ALL_FILMS[0];
-  document.getElementById('hero-img').src = px(f.poster);
+  const heroImg = document.getElementById('hero-img');
+  heroImg.classList.remove('noimg'); heroImg.dataset.fb = '0';
+  heroImg.onerror = ()=> imgFail(heroImg, f.poster||'', f.poster_alt||'');
+  heroImg.src = mediaUrl(f, 'poster');
   document.getElementById('hero-title').textContent = f.title;
   document.getElementById('hero-meta').innerHTML = `<b>${esc(f.categories?.[0]||'Öne Çıkan')}</b><span>•</span><span>HD 1080p</span><span>•</span><span>Yeni Eklendi</span>`;
   hero.classList.add('show');
@@ -744,7 +794,7 @@ function renderContinue(){
   document.getElementById('cw-count').textContent = `${items.length}`;
   row.innerHTML = items.map(({film,hist})=>`
     <div class="cw-card" onclick="openPlayer('${film.id}')">
-      <img loading="lazy" src="${px(film.poster)}" alt="">
+      <img loading="lazy" src="${mediaUrl(film, 'poster')}" onerror="imgFail(this,'${esc(film.poster||'')}','${esc(film.poster_alt||'')}')" alt="">
       <div class="progress" style="width:${hist.progress}%"></div>
       <div class="cw-info"><div class="cw-t">${esc(film.title)}</div><div class="cw-p">${Math.round(hist.progress)}% • ${fmtTime(hist.current||0)} kaldı</div></div>
     </div>
@@ -791,8 +841,8 @@ function applyFilter(){
     filtered = filtered.filter(f=> f.title.toLowerCase().includes(q) || (f.categories||[]).some(cat=>cat.toLowerCase().includes(q)) );
   }
   // sort
-  if(sortBy==="newest") filtered.sort((a,b)=> new Date(b.added||0)-new Date(a.added||0));
-  else if(sortBy==="oldest") filtered.sort((a,b)=> new Date(a.added||0)-new Date(b.added||0));
+  if(sortBy==="newest") filtered.sort((a,b)=> (parseDate(filmDate(b))||0)-(parseDate(filmDate(a))||0));
+  else if(sortBy==="oldest") filtered.sort((a,b)=> (parseDate(filmDate(a))||0)-(parseDate(filmDate(b))||0));
   else if(sortBy==="az") filtered.sort((a,b)=> a.title.localeCompare(b.title,'tr'));
   else if(sortBy==="za") filtered.sort((a,b)=> b.title.localeCompare(a.title,'tr'));
   else if(sortBy==="random") filtered.sort(()=> Math.random()-0.5);
@@ -837,7 +887,7 @@ function showMore(){
     const topCats = (f.categories||[]).slice(0,2);
     html+=`<div class="card" data-id="${f.id}" onclick="openPlayer('${f.id}')">
       <div class="card-poster">
-        <img loading="lazy" src="${px(f.poster)}" onerror="imgFail(this,'${esc(f.poster)}')" alt="${esc(f.title)}">
+        <img loading="lazy" src="${mediaUrl(f, 'poster')}" onerror="imgFail(this,'${esc(f.poster||'')}','${esc(f.poster_alt||'')}')" alt="${esc(f.title)}">
         <div class="card-gradient"></div>
         <div class="card-top">
           <div style="display:flex;gap:6px">
@@ -864,10 +914,16 @@ function showMore(){
     info.textContent=`${shown} / ${FILMS.length} gösteriliyor (${FILMS.length-shown} daha)`;
   } else wrap.classList.add('hidden');
 }
-function imgFail(el,direct){
-  if(el.dataset.fb==="1"){ el.dataset.fb="2"; el.src=direct; return; }
-  if(el.dataset.fb==="2"){ el.style.opacity=.12; return; }
-  el.dataset.fb="1"; el.onerror=()=> imgFail(el,direct);
+function imgFail(el,direct,alt){
+  const step = parseInt(el.dataset.fb||"0",10);
+  const next = [direct, alt].filter(u=> u && u!==el.src)[0];
+  if(next){
+    el.dataset.fb = String(step+1);
+    el.onerror = ()=> imgFail(el, direct, alt);
+    el.src = next;
+    return;
+  }
+  el.dataset.fb="9"; el.onerror=null; el.classList.add('noimg');
 }
 
 /* FAVORITES */
@@ -888,6 +944,14 @@ function updatePlayerFav(){
 }
 
 /* PLAYER LOGIC */
+/* Kaynak yönetimi: /stream/<id> sunucu tarafında çok adaylı çözülür.
+   Yine de başarısız olursa burada kademeli kurtarma çalışır:
+   1) HLS mi diye bak (hls.js devreye girer)
+   2) sunucudan taze kaynak iste (/api/resolve?refresh=1) ve yeniden dene
+   3) hepsi biterse teşhis bilgisiyle hata ekranı göster */
+const MAX_SRC_ATTEMPTS = 3;
+let srcAttempt = 0, hlsInst = null, hlsLoading = null, resolving = false;
+
 const video = document.getElementById('player');
 const modal = document.getElementById('player-modal');
 const stage = document.getElementById('video-stage');
@@ -906,7 +970,7 @@ function openPlayer(id){
   document.getElementById('ps-title').textContent = curFilm.title;
   document.getElementById('ctrl-cat').textContent = (curFilm.categories||[]).slice(0,2).join(' • ')||'Genel';
   document.getElementById('ps-id').textContent = '#'+curFilm.id;
-  document.getElementById('ps-added').textContent = curFilm.added||'-';
+  document.getElementById('ps-added').textContent = filmDate(curFilm)||'-';
   const catsEl = document.getElementById('ps-cats');
   catsEl.innerHTML = (curFilm.categories||[]).map(c=>`<span class="chip" onclick="selectCatFromPlayer('${esc(c).replace(/'/g,"\\'")}')">${esc(c)}</span>`).join('');
   const hist = historyMap[curFilm.id];
@@ -925,10 +989,10 @@ function openPlayer(id){
   controls.classList.remove('hide');
   controlsVisible=true;
 
-  // load video
-  const url = px(curFilm.stream);
-  video.src = url;
-  video.load();
+  // load video (başarısız olursa otomatik yedek kaynak denemeleri başlar)
+  hideVideoError();
+  setSourceStatus('bağlanıyor…');
+  attachSource(curFilm, 0);
   // restore volume/speed
   try{
     const v = parseFloat(localStorage.getItem(STORAGE_VOL));
@@ -952,6 +1016,8 @@ window.openPlayer = openPlayer;
 
 function closePlayer(){
   video.pause();
+  destroyHls();
+  hideVideoError();
   video.removeAttribute('src');
   video.load();
   modal.classList.add('hidden');
@@ -980,7 +1046,7 @@ function renderRelated(film){
   }
   grid.innerHTML = related.map(f=>`
     <div class="related-card" onclick="openPlayer('${f.id}')">
-      <img loading="lazy" src="${px(f.poster)}" alt="">
+      <img loading="lazy" src="${mediaUrl(f, 'poster')}" onerror="imgFail(this,'${esc(f.poster||'')}','${esc(f.poster_alt||'')}')" alt="">
       <div class="t">${esc(f.title)}</div>
     </div>
   `).join('');
@@ -1010,12 +1076,187 @@ function seekTo(percent){
   video.currentTime = percent*video.duration;
 }
 
+/* --- kaynak yükleme / kurtarma ------------------------------------- */
+function streamSrc(film, attempt){
+  const base = mediaUrl(film, 'stream');
+  return attempt ? `${base}?retry=${attempt}&t=${Date.now()}` : base;
+}
+function destroyHls(){
+  if(hlsInst){ try{ hlsInst.destroy(); }catch(e){} hlsInst = null; }
+}
+function setSourceStatus(text, ok){
+  const el = document.getElementById('ps-source');
+  if(!el) return;
+  el.textContent = text;
+  el.style.color = ok===true ? 'var(--success)' : ok===false ? 'var(--acc3)' : 'var(--txt2)';
+}
+function hideVideoError(){
+  const box = document.getElementById('video-error');
+  if(box) box.classList.remove('show');
+  const src = document.getElementById('ve-src');
+  if(src) src.innerHTML = '';
+}
+function attachSource(film, attempt){
+  srcAttempt = attempt || 0;
+  destroyHls();
+  hideVideoError();
+  loader.classList.remove('hidden');
+  bigPlay.classList.remove('show');
+  video.src = streamSrc(film, srcAttempt);
+  video.load();
+}
+function loadHlsJs(){
+  if(window.Hls) return Promise.resolve(window.Hls);
+  if(hlsLoading) return hlsLoading;
+  hlsLoading = new Promise((resolve,reject)=>{
+    const tag = document.createElement('script');
+    tag.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
+    tag.async = true;
+    tag.onload = ()=> resolve(window.Hls);
+    tag.onerror = ()=> reject(new Error('hls.js indirilemedi'));
+    document.head.appendChild(tag);
+  });
+  return hlsLoading;
+}
+async function isHlsSource(url){
+  try{
+    const r = await fetch(url, {method:'HEAD', cache:'no-store'});
+    const ct = (r.headers.get('Content-Type')||'').toLowerCase();
+    return ct.includes('mpegurl') || ct.includes('x-mpegurl');
+  }catch(e){ return false; }
+}
+async function attachHls(film, url){
+  if(video.canPlayType('application/vnd.apple.mpegurl')) return false;  // Safari yerel oynatır
+  try{
+    const Hls = await loadHlsJs();
+    if(!Hls || !Hls.isSupported()) return false;
+    destroyHls();
+    hlsInst = new Hls({ maxBufferLength: 30, enableWorker: true, lowLatencyMode: false });
+    hlsInst.loadSource(url);
+    hlsInst.attachMedia(video);
+    hlsInst.on(Hls.Events.MANIFEST_PARSED, ()=>{ setSourceStatus('HLS yayını', true); video.play().catch(()=>{}); });
+    hlsInst.on(Hls.Events.ERROR, (_e,data)=>{
+      if(!data || !data.fatal) return;
+      setSourceStatus('HLS hatası', false);
+      showVideoError(4, `Yayın kesildi: ${data.type || 'hls'} / ${data.details || ''}`);
+    });
+    return true;
+  }catch(e){ return false; }
+}
+async function handleSourceError(){
+  loader.classList.add('hidden');
+  if(!curFilm) { bigPlay.classList.add('show'); return; }
+  const film = curFilm;
+  const code = video.error ? video.error.code : 0;
+  const url = streamSrc(film, srcAttempt);
+
+  // 1) kaynak HLS olabilir: hls.js ile tekrar dene
+  if(!hlsInst && await isHlsSource(url)){
+    if(await attachHls(film, url)) return;
+  }
+
+  // 2) sunucudan taze kaynak çözümü iste, sonra tekrar dene
+  if(srcAttempt < MAX_SRC_ATTEMPTS){
+    srcAttempt += 1;
+    setSourceStatus(`yedek kaynak ${srcAttempt}/${MAX_SRC_ATTEMPTS}…`);
+    toast(`📡 Kaynak yenileniyor (${srcAttempt}/${MAX_SRC_ATTEMPTS})…`);
+    if(!resolving){
+      resolving = true;
+      try{
+        await fetch(`${MEDIA_PROXY}/api/resolve/${encodeURIComponent(film.id)}?refresh=1`, {cache:'no-store'});
+      }catch(e){}
+      resolving = false;
+    }
+    if(curFilm === film) attachSource(film, srcAttempt);
+    return;
+  }
+
+  // 3) teşhis ile hata ekranı
+  setSourceStatus('kaynak yok', false);
+  showVideoError(code);
+}
+const MEDIA_ERROR_TEXT = {
+  1: 'Oynatma kullanıcı/tarayıcı tarafından iptal edildi.',
+  2: 'Ağ hatası: video akışı indirilemedi.',
+  3: 'Çözme hatası: video biçimi bu tarayıcıda desteklenmiyor.',
+  4: 'Kaynak desteklenmiyor veya sunucu çalışan bir video adresi bulamadı.'
+};
+async function showVideoError(code, detail){
+  const box = document.getElementById('video-error');
+  const title = document.getElementById('ve-title');
+  const msg = document.getElementById('ve-msg');
+  const diag = document.getElementById('ve-src');
+  loader.classList.add('hidden');
+  bigPlay.classList.remove('show');
+  title.textContent = 'Bu film şu an oynatılamıyor';
+  msg.innerHTML = esc(detail || MEDIA_ERROR_TEXT[code] || 'Bilinmeyen oynatma hatası.') +
+    '<br>Sunucu yedek kaynakları (farklı CDN/Referer) denedi. Aşağıdaki teşhise bakabilir veya ' +
+    '<b>Kaynakları Onar</b> ile tüm kataloğu yeniden çözdürebilirsin.';
+  diag.innerHTML = '<b>teşhis bekleniyor…</b>';
+  box.classList.add('show');
+  if(!curFilm) return;
+  try{
+    const r = await fetch(`${MEDIA_PROXY}/api/resolve/${encodeURIComponent(curFilm.id)}?refresh=1&debug=1`, {cache:'no-store'});
+    const data = await r.json().catch(()=>({}));
+    if(data && data.ok){
+      box.classList.remove('show');
+      toast('✓ Çalışan kaynak bulundu, yeniden başlatılıyor', true);
+      attachSource(curFilm, 0);
+      return;
+    }
+    const tried = (data && data.tried) || [];
+    if(data && data.reachable === false){
+      title.textContent = 'Sunucu video kaynağına ulaşamıyor';
+      msg.innerHTML = 'Katalog doğru, ancak bu makineden CDN\'e hiçbir istek ulaşmadı ' +
+        '(ağ / VPN / DNS / güvenlik duvarı ya da CDN bu IP\'yi engelliyor). ' +
+        'Sunucuyu internete çıkabilen bir makinede çalıştır ya da bağlantıyı kontrol et.';
+    }
+    const blocked = (data && data.blocked_hosts) || {};
+    const blockedNames = Object.keys(blocked);
+    if(blockedNames.length){
+      diag.innerHTML = '<b>geçici olarak atlanan sunucular:</b> ' +
+        blockedNames.map(h=>`${esc(h)} (${blocked[h].fails} hata, ${blocked[h].cooldown_left}s)`).join(', ');
+    }
+    if(tried.length){
+      diag.innerHTML = tried.map(t=>{
+        const host = String(t.url||'').replace(/^https?:\/\//,'').split('/')[0];
+        const ref = t.referer ? String(t.referer).replace(/^https?:\/\//,'').split('/')[0] : 'referer yok';
+        return `<div>${esc(t.kind||'-')} • <b>${esc(host)}</b> • ${esc(ref)} → ${t.status ? 'HTTP '+t.status : 'bağlanılamadı'}</div>`;
+      }).join('');
+    } else {
+      diag.innerHTML = '<b>sunucudan teşhis alınamadı</b> (sunucu çalışıyor mu?)';
+    }
+  }catch(e){
+    diag.innerHTML = '<b>teşhis alınamadı:</b> ' + esc(String(e.message||e));
+  }
+}
+document.getElementById('ve-retry').onclick = ()=>{ if(curFilm) attachSource(curFilm, 0); };
+document.getElementById('ve-next').onclick = ()=>{ if(nextFilmId) openPlayer(nextFilmId); else closePlayer(); };
+document.getElementById('ve-repair').onclick = async ()=>{
+  toast('🛠 Onarım başlatıldı — sunucu ölü kaynakları yeniden çözüyor');
+  try{
+    await fetch(`${MEDIA_PROXY}/api/repair?limit=200`, {cache:'no-store'});
+    const poll = setInterval(async ()=>{
+      try{
+        const r = await fetch(`${MEDIA_PROXY}/api/repair/status`, {cache:'no-store'});
+        const st = await r.json();
+        if(!st.running){
+          clearInterval(poll);
+          const res = st.result || {};
+          toast(`✓ Onarım bitti: ${res.fixed||0} düzeldi, ${res.dead||0} ölü`, true);
+          if(curFilm) attachSource(curFilm, 0);
+        }
+      }catch(e){ clearInterval(poll); }
+    }, 3000);
+  }catch(e){ toast('❌ Onarım başlatılamadı'); }
+};
+
 /* Events */
 video.addEventListener('play', ()=>{ updatePlayIcons(); resetAutoHide(); loader.classList.add('hidden'); });
 video.addEventListener('pause', ()=>{ updatePlayIcons(); resetAutoHide(); });
 video.addEventListener('waiting', ()=> loader.classList.remove('hidden'));
 video.addEventListener('canplay', ()=> loader.classList.add('hidden'));
-video.addEventListener('error', ()=>{ loader.classList.add('hidden'); toast('❌ Video yüklenemedi, proxy dene veya tekrar dene'); bigPlay.classList.add('show'); });
+video.addEventListener('error', ()=>{ handleSourceError(); });
 video.addEventListener('timeupdate', ()=>{
   if(!isFinite(video.duration)) return;
   const pct = video.currentTime/video.duration;

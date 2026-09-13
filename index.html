@@ -647,7 +647,10 @@ img{max-width:100%}
 </div>
 
 <script>
-const PROXY = "https://evolixx.burhantasci72.workers.dev/?url=";
+// Media is served by server.py.  Keeping the request on the same origin avoids
+// third-party proxy outages and lets the server add the upstream's required
+// Referer, User-Agent and byte-range headers.
+const MEDIA_PROXY = /^https?:$/.test(location.protocol) ? location.origin : "";
 const VIDEOS_PER_PAGE = 48;
 const STORAGE_FAV = "evoli_favs_v2";
 const STORAGE_HIST = "evoli_hist_v2";
@@ -661,7 +664,10 @@ let favorites = new Set(), historyMap = {}, menuTab = "all";
 let theater = false, autoHideTimer = null, isDragging = false;
 let nextFilmId = null;
 
-function px(u){ return PROXY ? PROXY + encodeURIComponent(u) : u; }
+function mediaUrl(film, kind){
+  const source = kind === 'stream' ? film.stream : film.poster;
+  return MEDIA_PROXY && film.id ? `${MEDIA_PROXY}/${kind}/${encodeURIComponent(film.id)}` : source;
+}
 function esc(s){ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function toast(msg, acc=false){
   const old = document.querySelector('.toast'); if(old) old.remove();
@@ -721,7 +727,7 @@ function renderHero(){
   const hero = document.getElementById('hero');
   if(!ALL_FILMS.length) return;
   const f = ALL_FILMS[0];
-  document.getElementById('hero-img').src = px(f.poster);
+  document.getElementById('hero-img').src = mediaUrl(f, 'poster');
   document.getElementById('hero-title').textContent = f.title;
   document.getElementById('hero-meta').innerHTML = `<b>${esc(f.categories?.[0]||'Öne Çıkan')}</b><span>•</span><span>HD 1080p</span><span>•</span><span>Yeni Eklendi</span>`;
   hero.classList.add('show');
@@ -744,7 +750,7 @@ function renderContinue(){
   document.getElementById('cw-count').textContent = `${items.length}`;
   row.innerHTML = items.map(({film,hist})=>`
     <div class="cw-card" onclick="openPlayer('${film.id}')">
-      <img loading="lazy" src="${px(film.poster)}" alt="">
+      <img loading="lazy" src="${mediaUrl(film, 'poster')}" alt="">
       <div class="progress" style="width:${hist.progress}%"></div>
       <div class="cw-info"><div class="cw-t">${esc(film.title)}</div><div class="cw-p">${Math.round(hist.progress)}% • ${fmtTime(hist.current||0)} kaldı</div></div>
     </div>
@@ -837,7 +843,7 @@ function showMore(){
     const topCats = (f.categories||[]).slice(0,2);
     html+=`<div class="card" data-id="${f.id}" onclick="openPlayer('${f.id}')">
       <div class="card-poster">
-        <img loading="lazy" src="${px(f.poster)}" onerror="imgFail(this,'${esc(f.poster)}')" alt="${esc(f.title)}">
+        <img loading="lazy" src="${mediaUrl(f, 'poster')}" onerror="imgFail(this,'${esc(f.poster)}')" alt="${esc(f.title)}">
         <div class="card-gradient"></div>
         <div class="card-top">
           <div style="display:flex;gap:6px">
@@ -926,7 +932,7 @@ function openPlayer(id){
   controlsVisible=true;
 
   // load video
-  const url = px(curFilm.stream);
+  const url = mediaUrl(curFilm, 'stream');
   video.src = url;
   video.load();
   // restore volume/speed
@@ -980,7 +986,7 @@ function renderRelated(film){
   }
   grid.innerHTML = related.map(f=>`
     <div class="related-card" onclick="openPlayer('${f.id}')">
-      <img loading="lazy" src="${px(f.poster)}" alt="">
+      <img loading="lazy" src="${mediaUrl(f, 'poster')}" alt="">
       <div class="t">${esc(f.title)}</div>
     </div>
   `).join('');

@@ -1,12 +1,30 @@
 # -*- coding: utf-8 -*-
-import json, os, socket, mimetypes
+import json, os, socket, mimetypes, ssl
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote
 import requests as req
+from requests.adapters import HTTPAdapter
 import urllib3
 from config import *
 
 urllib3.disable_warnings()
+
+
+class SSLAdapter(HTTPAdapter):
+    """Allow older CDN TLS configurations without weakening the browser."""
+    def init_poolmanager(self, *args, **kwargs):
+        context = ssl.create_default_context()
+        context.set_ciphers("DEFAULT@SECLEVEL=1")
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
+
+
+# Keep connections alive and use the same tolerant TLS setup as the scraper.
+UPSTREAM = req.Session()
+UPSTREAM.mount("https://", SSLAdapter())
+UPSTREAM.mount("http://", SSLAdapter())
 
 DB = {"films": [], "categories": {}, "updated": "", "total": 0}
 
@@ -147,12 +165,21 @@ class Handler(BaseHTTPRequestHandler):
         url = f["stream"] if tip == "stream" else f.get("poster", "")
         if not url:
             return self._send(404, "text/plain", b"no url")
-        h = {"User-Agent": USER_AGENT, "Referer": REFERER}
+        h = {
+            "User-Agent": USER_AGENT,
+            "Referer": REFERER,
+            "Origin": REFERER.rstrip("/"),
+            "Accept": "*/*",
+            # Video CDNs sometimes compress responses despite a Range header,
+            # which makes byte offsets invalid in browsers.
+            "Accept-Encoding": "identity",
+        }
         rng = self.headers.get("Range")
         if rng:
             h["Range"] = rng
         try:
-            up = req.get(url, headers=h, stream=True, verify=False, timeout=30)
+            up = UPSTREAM.get(url, headers=h, stream=True, verify=False,
+                              allow_redirects=True, timeout=(10, 120))
         except Exception as e:
             return self._send(502, "text/plain", f"upstream error: {e}".encode())
         # pass through status
@@ -160,6 +187,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = up.headers.get("Content-Type", "video/mp4" if tip == "stream" else "image/jpeg")
         self.send_header("Content-Type", ctype)
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
         self.send_header("Accept-Ranges", "bytes")
         # Important headers for video
         for hk in ("Content-Length", "Content-Range", "Content-Disposition", "Cache-Control", "ETag", "Last-Modified"):

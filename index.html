@@ -10,64 +10,100 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,sans-serif;min-height:100vh}
 
-header{position:sticky;top:0;z-index:20;background:rgba(11,11,16,.95);backdrop-filter:blur(12px);padding:12px 14px;border-bottom:1px solid var(--border)}
-.top{display:flex;gap:10px;align-items:center}
+header{position:sticky;top:0;z-index:20;background:rgba(11,11,16,.95);backdrop-filter:blur(12px);padding:12px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
+#menu-btn{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:background .2s}
+#menu-btn:hover{background:#1c1c28}
+.top{flex:1;display:flex;gap:10px;align-items:center}
 .top h1{font-size:18px;white-space:nowrap;font-weight:700}
 .top h1 span{color:var(--acc)}
-#q{flex:1;background:#1c1c28;border:1px solid var(--border);color:#fff;padding:10px 14px;border-radius:22px;outline:none;font-size:14px}
+#q{flex:1;background:#1c1c28;border:1px solid var(--border);color:#fff;padding:9px 14px;border-radius:22px;outline:none;font-size:14px;min-width:0}
 #q:focus{border-color:var(--acc)}
 
-.chips{display:flex;gap:8px;overflow-x:auto;padding-top:10px;scrollbar-width:none}
-.chips::-webkit-scrollbar{display:none}
-.chip{background:#1c1c28;border:1px solid var(--border);padding:7px 14px;border-radius:16px;font-size:12px;cursor:pointer;white-space:nowrap}
-.chip:hover{background:#252535}
-.chip.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
+/* YAN MENÜ */
+.menu-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:40;opacity:0;pointer-events:none;transition:opacity .3s}
+.menu-overlay.show{opacity:1;pointer-events:auto}
+.menu{position:fixed;top:0;left:0;bottom:0;width:280px;max-width:85vw;background:#0a0a0f;z-index:41;transform:translateX(-100%);transition:transform .3s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;border-right:1px solid var(--border)}
+.menu.show{transform:translateX(0)}
+.menu-head{padding:16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.menu-head h3{font-size:15px;font-weight:600}
+.menu-head button{background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:4px 8px}
+.menu-search{padding:12px 16px}
+.menu-search input{width:100%;background:#1c1c28;border:1px solid var(--border);color:#fff;padding:9px 12px;border-radius:8px;outline:none;font-size:13px}
+.menu-list{flex:1;overflow-y:auto;padding:4px 8px 16px}
+.menu-item{padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#ccc;transition:background .15s;margin-bottom:2px}
+.menu-item:hover{background:#1c1c28}
+.menu-item.on{background:var(--acc);color:#fff;font-weight:600}
+.menu-item .count{font-size:11px;opacity:.7;font-weight:500}
 
-.count{padding:10px 16px 0;font-size:12px;color:var(--muted)}
-
+/* GRID */
+.count-bar{padding:10px 16px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border)}
+.count-bar b{color:var(--acc)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;padding:14px}
 @media(max-width:480px){.grid{grid-template-columns:repeat(2,1fr);gap:10px;padding:10px}}
-
 .card{background:var(--card);border-radius:10px;overflow:hidden;cursor:pointer;transition:transform .18s;position:relative}
 .card:hover{transform:scale(1.04)}
 .card img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#222}
 .card .t{padding:8px 10px;font-size:12px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-weight:500}
 .card .new{position:absolute;top:6px;right:6px;background:var(--acc);color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700}
 
+/* DAHA FAZLA BUTONU */
+.load-more-wrap{padding:20px;text-align:center}
+.load-more{background:var(--acc);border:none;color:#fff;padding:12px 28px;border-radius:22px;font-size:14px;font-weight:600;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.load-more:hover{transform:translateY(-2px);box-shadow:0 4px 15px rgba(229,9,20,.4)}
+.load-more:disabled{opacity:.5;cursor:not-allowed}
+.load-info{margin-top:8px;font-size:12px;color:var(--muted)}
+
+/* MODAL */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.98);z-index:50;display:flex;align-items:center;justify-content:center;padding:12px}
 .hidden{display:none!important}
 .box{width:100%;max-width:1100px;background:#000;border-radius:8px;overflow:hidden}
 .mhead{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#0a0a0f}
 .mhead h2{font-size:15px;font-weight:600;flex:1}
 #mclose{background:var(--acc);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-
-.video-wrap{width:100%;background:#000;position:relative}
+.video-wrap{width:100%;background:#000}
 .video-wrap video{width:100%;max-height:80vh;display:block;background:#000}
 
 #loading{padding:60px 20px;text-align:center;color:var(--muted)}
-#loading .spinner{display:inline-block;width:40px;height:40px;border:3px solid #222;border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:14px}
+.spinner{display:inline-block;width:40px;height:40px;border:3px solid #222;border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:14px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--acc);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,.5)}
-
-.empty{padding:60px 20px;text-align:center;color:var(--muted)}
-.empty h3{margin-bottom:8px;color:#bbb}
+.empty{padding:60px 20px;text-align:center;color:var(--muted);grid-column:1/-1}
 </style>
 </head>
 <body>
 
 <header>
+  <button id="menu-btn" aria-label="Menü">☰</button>
   <div class="top">
     <h1>🎬 Film<span>Bot</span></h1>
     <input id="q" placeholder="Film ara..." autocomplete="off">
   </div>
-  <div id="cats" class="chips"></div>
 </header>
 
-<div id="count" class="count"></div>
+<div class="count-bar" id="count"></div>
 <main id="grid" class="grid"></main>
+<div id="load-more-wrap" class="load-more-wrap hidden">
+  <button class="load-more" id="load-more-btn">Daha Fazla Göster</button>
+  <div class="load-info" id="load-info"></div>
+</div>
+
 <div id="loading"><div class="spinner"></div><div>Yükleniyor...</div></div>
 
+<!-- YAN MENÜ -->
+<div class="menu-overlay" id="menu-overlay"></div>
+<aside class="menu" id="menu">
+  <div class="menu-head">
+    <h3>Kategoriler</h3>
+    <button id="menu-close">✕</button>
+  </div>
+  <div class="menu-search">
+    <input id="menu-q" placeholder="Kategori ara...">
+  </div>
+  <div class="menu-list" id="menu-list"></div>
+</aside>
+
+<!-- PLAYER -->
 <div id="modal" class="modal hidden">
   <div class="box">
     <div class="mhead">
@@ -81,137 +117,205 @@ header{position:sticky;top:0;z-index:20;background:rgba(11,11,16,.95);backdrop-f
 </div>
 
 <script>
-// ============================================
 const PROXY = "https://evolixx.burhantasci72.workers.dev/?url=";
-// ============================================
+const VIDEOS_PER_PAGE = 100;
 
-let FILMS = [], curCat = "Tümü", curQ = "", curFilm = null, updated = "";
+let ALL_FILMS = [], FILMS = [], CATEGORIES = {};
+let curCat = "Tümü", curQ = "", menuQ = "", curFilm = null;
+let shown = 0;
 
-function px(u) { 
-  if (!PROXY) return u;
-  return PROXY + encodeURIComponent(u); 
-}
+function px(u){ return PROXY ? PROXY + encodeURIComponent(u) : u; }
 
-function toast(msg) {
+function toast(msg){
   const old = document.querySelector('.toast');
-  if (old) old.remove();
+  if(old) old.remove();
   const t = document.createElement('div');
   t.className = 'toast';
   t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+  setTimeout(() => t.remove(), 2500);
 }
 
+// JSON yükle
 fetch("films.json?" + Date.now())
-  .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-  .then(db => { FILMS = db.films || []; updated = db.updated || ""; init(); })
+  .then(r => { if(!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+  .then(db => {
+    ALL_FILMS = db.films || [];
+    CATEGORIES = db.categories || {};
+    init();
+  })
   .catch(e => { document.getElementById('loading').innerHTML = "<h3>Hata: " + e.message + "</h3>"; });
 
-function init() {
+function init(){
   document.getElementById('loading').style.display = 'none';
-  chips();
-  render();
+  renderMenu();
+  applyFilter();
+  
+  // Hash'ten film aç
+  const hash = window.location.hash.slice(1);
+  if(hash && ALL_FILMS.some(f => f.id === hash)){
+    setTimeout(() => ac(hash), 300);
+  }
 }
 
-function imgFail(el, direct) {
-  if (el.dataset.fb === "1") { el.dataset.fb = "2"; el.src = direct; return; }
-  if (el.dataset.fb === "2") { el.style.opacity = .15; return; }
+// Menü render
+function renderMenu(){
+  const list = document.getElementById('menu-list');
+  const counts = {};
+  ALL_FILMS.forEach(f => (f.categories||[]).forEach(c => counts[c] = (counts[c]||0)+1));
+  
+  let items = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  if(menuQ){
+    const q = menuQ.toLowerCase();
+    items = items.filter(([c]) => c.toLowerCase().includes(q));
+  }
+  
+  const allCount = ALL_FILMS.length;
+  const totalCats = Object.keys(counts).length;
+  
+  let html = `<div class="menu-item ${curCat==='Tümü'?'on':''}" onclick="selectCat('Tümü')">
+    <span>🎬 Tümü</span><span class="count">${allCount}</span>
+  </div>`;
+  
+  items.forEach(([cat, cnt]) => {
+    html += `<div class="menu-item ${curCat===cat?'on':''}" onclick="selectCat('${esc(cat)}')">
+      <span>${esc(cat)}</span><span class="count">${cnt}</span>
+    </div>`;
+  });
+  
+  list.innerHTML = html;
+}
+
+function selectCat(c){
+  curCat = c;
+  closeMenu();
+  renderMenu();
+  applyFilter();
+}
+
+function applyFilter(){
+  const q = curQ;
+  FILMS = ALL_FILMS.filter(f => {
+    if(curCat !== "Tümü" && !(f.categories||[]).includes(curCat)) return false;
+    if(q && !f.title.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  shown = 0;
+  document.getElementById('grid').innerHTML = '';
+  showMore();
+  updateCountBar();
+}
+
+function showMore(){
+  const grid = document.getElementById('grid');
+  const end = Math.min(shown + VIDEOS_PER_PAGE, FILMS.length);
+  const now = Date.now();
+  let html = '';
+  for(let i = shown; i < end; i++){
+    const f = FILMS[i];
+    const isNew = f.added && (now - new Date(f.added).getTime()) < 7*24*3600*1000;
+    html += `<div class="card" onclick="ac('${f.id}')">
+      ${isNew ? '<div class="new">YENİ</div>' : ''}
+      <img loading="lazy" src="${px(f.poster)}" onerror="imgFail(this,'${esc(f.poster)}')" alt="${esc(f.title)}">
+      <div class="t">${esc(f.title)}</div>
+    </div>`;
+  }
+  grid.insertAdjacentHTML('beforeend', html);
+  shown = end;
+  
+  // Daha fazla butonunu göster/gizle
+  const wrap = document.getElementById('load-more-wrap');
+  const info = document.getElementById('load-info');
+  if(shown < FILMS.length){
+    wrap.classList.remove('hidden');
+    info.textContent = `${shown} / ${FILMS.length} gösteriliyor (${FILMS.length - shown} daha)`;
+  } else {
+    wrap.classList.add('hidden');
+  }
+}
+
+function updateCountBar(){
+  const count = document.getElementById('count');
+  if(FILMS.length === 0){
+    count.innerHTML = `Sonuç yok`;
+    document.getElementById('grid').innerHTML = `<div class="empty"><h3>Film bulunamadı</h3></div>`;
+  } else {
+    const catInfo = curCat === "Tümü" ? "" : ` · <b>${esc(curCat)}</b>`;
+    count.innerHTML = `<b>${FILMS.length}</b> film${catInfo} · Kitaplık: <b>${ALL_FILMS.length}</b> · Kategori: <b>${Object.keys(CATEGORIES).length}</b>`;
+  }
+}
+
+function imgFail(el, direct){
+  if(el.dataset.fb === "1"){ el.dataset.fb = "2"; el.src = direct; return; }
+  if(el.dataset.fb === "2"){ el.style.opacity = .15; return; }
   el.dataset.fb = "1";
   el.onerror = () => imgFail(el, direct);
 }
 
-const counts = {};
-FILMS.forEach(f => (f.categories || []).forEach(c => counts[c] = (counts[c] || 0) + 1));
-const cats = ["Tümü", ...Object.entries(counts).sort((a, b) => b[1] - a[1]).map(e => e[0])];
+const esc = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
-const esc = s => String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-
-function chips() {
-  document.getElementById('cats').innerHTML = cats.map(c =>
-    `<div class="chip ${c === curCat ? 'on' : ''}" onclick="setCat('${esc(c)}')">${esc(c)}${c !== 'Tümü' ? ' (' + counts[c] + ')' : ''}</div>`
-  ).join('');
-}
-
-function setCat(c) { curCat = c; chips(); render(); }
-
-function render() {
-  const g = document.getElementById('grid');
-  const list = FILMS.filter(f =>
-    (curCat === "Tümü" || (f.categories || []).includes(curCat)) &&
-    f.title.toLowerCase().includes(curQ)
-  );
-  
-  document.getElementById('count').innerHTML =
-    `<b>${list.length}</b> film · Kitaplık: <b>${FILMS.length}</b>`;
-  
-  if (list.length === 0) {
-    g.innerHTML = `<div class="empty" style="grid-column:1/-1"><h3>Film bulunamadı</h3></div>`;
-    return;
-  }
-  
-  g.innerHTML = list.map(f => {
-    return `<div class="card" onclick="ac('${f.id}')">
-      <img loading="lazy" src="${px(f.poster)}" onerror="imgFail(this,'${esc(f.poster)}')" alt="${esc(f.title)}">
-      <div class="t">${esc(f.title)}</div>
-    </div>`;
-  }).join('');
-}
-
-function ac(id) {
-  curFilm = FILMS.find(f => f.id === id);
-  if (!curFilm) return;
-  
+function ac(id){
+  curFilm = ALL_FILMS.find(f => f.id === id);
+  if(!curFilm) return;
   document.getElementById('mtitle').textContent = curFilm.title;
-  
   const videoEl = document.getElementById('player');
   const url = px(curFilm.stream);
-  
-  // DEBUG: URL'yi console'a ve toast'a yaz
-  console.log("🎬 Video URL:", url);
-  toast("Video yükleniyor...");
-  
-  videoEl.onerror = function(e) {
-    console.error("Video error:", e);
-    toast("❌ Video yüklenemedi!");
-  };
-  
-  videoEl.oncanplay = function() {
-    toast("✓ Video hazır");
-  };
-  
+  videoEl.onerror = () => toast("❌ Video yüklenemedi");
   videoEl.src = url;
   videoEl.load();
-  
   document.getElementById('modal').classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  
-  setTimeout(() => {
-    videoEl.play().catch(err => {
-      console.error("Play error:", err);
-      toast("⚠️ Oynatma hatası: " + err.message);
-    });
-  }, 200);
+  history.replaceState(null, '', '#' + curFilm.id);
+  setTimeout(() => videoEl.play().catch(() => {}), 150);
 }
 
-document.getElementById('mclose').onclick = () => {
+function closeModal(){
   const videoEl = document.getElementById('player');
   videoEl.pause();
   videoEl.src = '';
   videoEl.load();
-  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').classList.remove('hidden').classList.add('hidden');
   document.body.style.overflow = '';
+  history.replaceState(null, '', window.location.pathname);
+}
+
+// Menü aç/kapat
+function openMenu(){
+  document.getElementById('menu').classList.add('show');
+  document.getElementById('menu-overlay').classList.add('show');
+  renderMenu();
+}
+function closeMenu(){
+  document.getElementById('menu').classList.remove('show');
+  document.getElementById('menu-overlay').classList.remove('show');
+}
+
+// Event listeners
+document.getElementById('menu-btn').onclick = openMenu;
+document.getElementById('menu-close').onclick = closeMenu;
+document.getElementById('menu-overlay').onclick = closeMenu;
+document.getElementById('mclose').onclick = closeModal;
+document.getElementById('load-more-btn').onclick = showMore;
+
+document.getElementById('q').oninput = e => {
+  curQ = e.target.value.toLowerCase().trim();
+  applyFilter();
 };
 
-document.getElementById('q').oninput = e => { curQ = e.target.value.toLowerCase().trim(); render(); };
+document.getElementById('menu-q').oninput = e => {
+  menuQ = e.target.value.toLowerCase().trim();
+  renderMenu();
+};
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !document.getElementById('modal').classList.contains('hidden')) {
-    document.getElementById('mclose').click();
+  if(e.key === 'Escape'){
+    if(!document.getElementById('modal').classList.contains('hidden')) closeModal();
+    else if(document.getElementById('menu').classList.contains('show')) closeMenu();
   }
 });
 
 document.getElementById('modal').addEventListener('click', e => {
-  if (e.target.id === 'modal') document.getElementById('mclose').click();
+  if(e.target.id === 'modal') closeModal();
 });
 </script>
 </body>

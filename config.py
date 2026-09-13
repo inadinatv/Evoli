@@ -7,8 +7,21 @@ REFERER = "https://www.evoolipxnyxzq.shop/"
 
 PORT = 8000
 SCAN_INTERVAL_HOURS = 6
+
+# Her taramada kaç sayfa gezilsin (kategoriler hariç ana sayfa)
 PAGES_PER_SCAN = 5
-REQUEST_DELAY = 0.6
+
+# Kategoriler tara mı? (çok uzun sürer, 625+ sayfa olabilir)
+SCAN_ALL_CATEGORIES = True
+
+# Her kategoriden maksimum kaç sayfa taransın (0 = sınırsız)
+MAX_PAGES_PER_CATEGORY = 10
+
+# İstekler arası bekleme (saniye)
+REQUEST_DELAY = 0.7
+
+# HTML'de sayfa başına kaç film gösterilsin (daha fazla butonu için)
+VIDEOS_PER_PAGE_HTML = 100
 
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

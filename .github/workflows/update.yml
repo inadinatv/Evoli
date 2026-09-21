@@ -1,21 +1,49 @@
 name: Otomatik Güncelleme
+
 on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Tam arşiv taraması (uzun sürer)"
+        type: boolean
+        default: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install requests beautifulsoup4
-      - run: python -c "from scraper import scan; scan()"
-      - run: |
+
+      - name: Bağımlılıklar
+        run: pip install -r requirements.txt
+
+      - name: Testler (sahte site üzerinde uçtan uca)
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Katalogu güncelle
+        env:
+          # GitHub Actions IP'leri CDN tarafından engellenebiliyor; doğrulama
+          # kullanıcının kendi makinesinde (bot.py repair) yapılmalı.
+          EVOLI_VERIFY_STREAMS: "0"
+          EVOLI_SCAN_WORKERS: "6"
+        run: |
+          if [ "${{ inputs.full }}" = "true" ]; then
+            python bot.py full
+          else
+            python bot.py scan
+          fi
+
+      - name: Değişiklikleri gönder
+        run: |
           git config user.name "film-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add films.json playlist.m3u
-          git diff --cached --quiet || git commit -m "auto update"
+          git add films.json playlist.m3u playlist_local.m3u
+          git diff --cached --quiet || git commit -m "auto update: $(date -u +'%Y-%m-%d %H:%M') UTC"
           git push

@@ -39,6 +39,7 @@ _META_CONTENT_REV = re.compile(
 _IFRAME = re.compile(r"""<iframe\b[^>]*>""", re.I)
 _ATTR = lambda name: re.compile(r"""\b""" + name + r"""\s*=\s*["']([^"']*)["']""", re.I)  # noqa: E731
 _LINK_HREF = re.compile(r"""<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", re.I | re.S)
+_LINK_FULL = re.compile(r"""<a\b([^>]*)>(.*?)</a>""", re.I | re.S)
 _TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 _H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.I | re.S)
 _TAGS = re.compile(r"<[^>]+>")
@@ -61,6 +62,29 @@ NON_FILM_HINTS = (
 
 def clean_text(fragment: str) -> str:
     return _TAGS.sub("", fragment or "").replace("&amp;", "&").replace("&#8217;", "'").strip()
+
+
+def is_generic_image(url: str) -> bool:
+    """Site logosu / favicon / yer tutucu görsel mi?
+
+    Gerçek sitenin her sayfasındaki ``og:image`` çoğu zaman sitenin logosu
+    (``logo1.png``); eski kod bunu afiş olarak kaydediyordu — 1000+ film aynı
+    logoyu gösteriyordu.  Böyle jenerik görseller afiş adayı olarak alınmaz.
+    """
+    if not url:
+        return True
+    name = (urlparse(url).path or "").rstrip("/").split("/")[-1].lower()
+    name = name.split("?")[0]
+    if not name:
+        return True
+    for hint in getattr(config, "BAD_POSTER_HINTS", ()):
+        hint = hint.lower()
+        # "logo" -> logo.png, logo1.png, logo-2.jpg ...; "biyoloji.jpg'yi yakalama
+        if re.match(r"^" + re.escape(hint) + r"[\d._\-]*(?:\.[a-z0-9]+)?$", name):
+            return True
+        if re.match(r"^" + re.escape(hint) + r"[-_.]", name):
+            return True
+    return False
 
 
 def meta_map(html: str) -> dict:
@@ -207,8 +231,9 @@ def find_title(html: str, fallback: str = "") -> str:
     return fallback
 
 
-def find_poster(html: str, base_url: str = "", video_id: Optional[str] = None) -> list:
-    """Afiş adayları (öncelik sırasıyla)."""
+def find_poster(html: str, base_url: str = "", video_id: Optional[str] = None,
+                allow_generic: bool = False) -> list:
+    """Afiş adayları (öncelik sırasıyla).  Logo/yer tutucu görseller elenir."""
     if not html:
         return []
     text = unescape_media(html)
@@ -220,8 +245,11 @@ def find_poster(html: str, base_url: str = "", video_id: Optional[str] = None) -
         if not url:
             return
         full = absolute(base_url, url)
-        if full and full not in out and full.lower().startswith("http"):
-            out.append(full)
+        if not full or full in out or not full.lower().startswith("http"):
+            return
+        if not allow_generic and is_generic_image(full):
+            return
+        out.append(full)
 
     for key in ("og:image", "og:image:secure_url", "twitter:image", "image", "thumbnail"):
         if metas.get(key):
@@ -253,19 +281,66 @@ def known_cdn_hosts(extra: Optional[Iterable[str]] = None) -> list:
     return hosts
 
 
-def find_category_links(html: str, base_url: str = "") -> dict:
-    """Kategori adı -> kategori adresi."""
-    cats: dict = {}
-    for href, inner in _LINK_HREF.findall(html or ""):
-        if not href:
+def find_category_links(html: str, base_url: str = "", scope: str = "all") -> dict:
+    """Kategori adı -> kategori adresi.
+
+    ``scope="all"``      → sayfadaki tüm ``-o``/``-i`` kategori bağlantıları
+    (kategori keşfi için; menü/nav dahil).
+    ``scope="content"``  → yalnızca içeriğe ait kategoriler (film sayfası).
+    Sitede menü/yan sütunda TÜM kategoriler listelendiği için film kaydına
+    eski kod 52 kategorinin tamamını yazıyordu; ``content`` kapsamı nav/header/
+    footer/aside/yan sütun bloklarını atar, WordPress'in gerçek film
+    kategorisi olan ``rel="category"`` bağlantılarına öncelik verir.
+    """
+    if scope == "content":
+        html = _strip_chrome(html or "")
+    plain: dict = {}
+    rel_cats: dict = {}
+    for attrs, inner in _LINK_FULL.findall(html or ""):
+        href_m = _ATTR("href").search(attrs)
+        if not href_m:
             continue
+        href = href_m.group(1)
         if not (href.rstrip("/").endswith("-o") or href.rstrip("/").endswith("-i")):
             continue
         name = clean_text(inner)
-        if not name or len(name) < 2 or len(name) > 60 or name in cats:
+        if not name or len(name) < 2 or len(name) > 60:
             continue
-        cats[name] = absolute(base_url, href)
-    return cats
+        rel_m = _ATTR("rel").search(attrs)
+        is_rel = bool(rel_m and re.search(r"\bcategory\b", rel_m.group(1), re.I))
+        bucket = rel_cats if is_rel else plain
+        if name not in bucket:
+            bucket[name] = absolute(base_url, href)
+    if scope == "content":
+        # rel="category" bağlantıları varsa gerçek film kategorileri bunlardır.
+        return rel_cats or plain
+    # "all" kapsamı: menü/nav dahil her şey (kategori sayfası keşfi için)
+    out = dict(rel_cats)
+    out.update({k: v for k, v in plain.items() if k not in out})
+    return out
+
+
+_CHROME_BLOCK = re.compile(
+    r"<(?:nav|header|footer|aside)\b[^>]*>.*?</(?:nav|header|footer|aside)>",
+    re.I | re.S,
+)
+_CHROME_DIV = re.compile(
+    r"""<(div|ul|section|aside)\b[^>]*(?:class|id)\s*=\s*["'][^"']*"""
+    r"""(?:sidebar|widget|menu|navbar|footer|header|tag-?cloud|kategori-?liste|cat-?liste|side-?bar)[^"']*["'][^>]*>"""
+    r""".*?</\1>""",
+    re.I | re.S,
+)
+
+
+def _strip_chrome(html: str) -> str:
+    """Menü/yan sütun/altbilgi bloklarını kaldırır (film içeriği kalır)."""
+    out = _CHROME_BLOCK.sub(" ", html or "")
+    for _ in range(3):
+        stripped = _CHROME_DIV.sub(" ", out)
+        if stripped == out:
+            break
+        out = stripped
+    return out
 
 
 def looks_like_film_url(url: str, allowed_hosts: Optional[Iterable[str]] = None) -> bool:

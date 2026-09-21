@@ -33,6 +33,32 @@ import net
 
 VIDEO_CT = ("video/", "application/octet-stream", "mpegurl", "dash+xml", "audio/")
 BAD_CT = ("text/html", "application/json", "text/xml", "text/plain")
+IMAGE_CT = ("image/",)
+IMAGE_MAGIC = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"RIFF", "image/webp"),
+    (b"BM", "image/bmp"),
+)
+
+
+def is_image_response(status: int, headers: dict, head: bytes = b"") -> bool:
+    """Yanıt gerçekten bir görsel mi?  Bazı CDN'ler yanlış Content-Type
+    döndürdüğü için imza (magic bytes) da kontrol edilir."""
+    if status not in (200, 206):
+        return False
+    ctype = (headers.get("Content-Type") or headers.get("content-type") or "").lower()
+    if any(bad in ctype for bad in BAD_CT):
+        return False
+    if any(good in ctype for good in IMAGE_CT):
+        return True
+    if head:
+        for magic, _name in IMAGE_MAGIC:
+            if head.startswith(magic):
+                return True
+    return False
 
 
 class Candidate:
@@ -228,6 +254,19 @@ class MediaResolver:
         if self.autosave:
             self.save()
 
+    def remember_poster(self, film_id: str, url: str, referer: Optional[str]):
+        """Doğrulanan afiş adresini önbelleğe yazar (/poster/<id> tek atışta dönsün)."""
+        if not film_id or not url:
+            return
+        with self._lock:
+            item = self._cache["items"].setdefault(str(film_id), {})
+            item["poster"] = url
+            item["poster_ref"] = referer or ""
+            item["poster_ts"] = int(time.time())
+            self._dirty = True
+        if self.autosave:
+            self.save()
+
     def note_cdn_host(self, url: str):
         host = net.host_of(url)
         if not host:
@@ -405,6 +444,123 @@ class MediaResolver:
             return ok, status, rheaders
         finally:
             resp.close()
+
+    def probe_image(self, url: str, referer: Optional[str] = None,
+                    ua: Optional[str] = None, timeout=None) -> tuple:
+        """Bir afiş/görsel adresinin gerçekten görsel döndürüp döndürmediğini dener.
+
+        Dönüş: ``(ok, status, content_type, head_bytes)``.
+        """
+        if self.host_blocked(url):
+            return False, 0, "", b""
+        timeout = timeout or config.PROBE_TIMEOUT
+        headers = net.browser_headers(referer=referer or None, ua=ua or None,
+                                      range_header="bytes=0-2047",
+                                      accept="image/*,*/*;q=0.8")
+        try:
+            resp = self.session.get(url, headers=headers, timeout=timeout,
+                                    verify=False, allow_redirects=True, stream=True)
+        except Exception:  # noqa: BLE001
+            self.note_host_result(url, 0)
+            return False, 0, "", b""
+        try:
+            status = resp.status_code
+            self.note_host_result(url, status)
+            rheaders = dict(resp.headers)
+            head = b""
+            if status in (200, 206):
+                try:
+                    head = resp.raw.read(32, decode_content=True) or b""
+                except Exception:
+                    head = b""
+            ctype = rheaders.get("Content-Type") or ""
+            return is_image_response(status, rheaders, head), status, ctype, head
+        finally:
+            resp.close()
+
+    def poster_candidates(self, film: dict) -> list:
+        """Film için denenecek *ucuz* afiş adayları ``[(url, referer), ...]``.
+
+        Önbellek -> film kaydı -> CDN şablonları.  Sayfa indirme yoktur; o iş
+        (son çare) ``resolve_poster`` / ``refresh_posters_from_page`` tarafında.
+        """
+        out: list = []
+        seen = set()
+        referers = [r for r in net.referer_candidates(film, self.meta) if r][:3] + [None]
+
+        def push(url):
+            url = (url or "").strip()
+            if not url or not url.lower().startswith("http") or url in seen:
+                return
+            if extract.is_generic_image(url):
+                return
+            seen.add(url)
+            for ref in referers:
+                out.append((url, ref))
+
+        item = self.get_item(str(film.get("id") or ""))
+        if item and item.get("poster"):
+            push(item["poster"])
+        push(film.get("poster"))
+        push(film.get("poster_alt"))
+        vid = self.video_id(film)
+        if vid and vid.isdigit():
+            for host in self.cdn_hosts(film)[:4]:
+                for tpl in config.CDN_POSTER_TEMPLATES:
+                    push(tpl.format(host=host, id=vid))
+        return out
+
+    def resolve_poster(self, film: dict, allow_page: bool = True) -> dict:
+        """Çalışan afiş adresini bulur ve önbelleğe yazar.
+
+        Sıra: ucuz adaylar (önbellek/kayıt/şablon) -> son çare sayfa/ögme
+        görselleri.  Dönüş: ``{ok, url, referer, content_type, tried}``.
+        """
+        result = {"ok": False, "url": "", "referer": None, "content_type": "", "tried": []}
+        referers = [r for r in net.referer_candidates(film, self.meta) if r][:3] + [None]
+
+        def attempt(url, referer) -> bool:
+            ok, status, ctype, _head = self.probe_image(url, referer)
+            result["tried"].append({"url": url, "referer": referer, "status": status, "ok": ok})
+            if ok:
+                result.update({"ok": True, "url": url, "referer": referer, "content_type": ctype})
+                fid = str(film.get("id") or "")
+                if fid:
+                    self.remember_poster(fid, url, referer)
+                self.stats["poster_ok"] += 1
+                return True
+            return False
+
+        for url, referer in self.poster_candidates(film):
+            if attempt(url, referer):
+                return result
+        if allow_page:
+            for url in self.refresh_posters_from_page(film):
+                for referer in referers:
+                    if attempt(url, referer):
+                        return result
+        self.stats["poster_fail"] += 1
+        return result
+
+    def refresh_posters_from_page(self, film: dict) -> list:
+        """Film/gömme sayfasından gerçek afış adayları (logo vb. elenmiş)."""
+        page_url = film.get("url") or ""
+        if not page_url or self.host_blocked(page_url):
+            return []
+        result = net.fetch_first_working(self.session, net.mirror_urls(page_url),
+                                         referer=self.meta.get("site") or config.SITE_HOME)
+        if not result.ok:
+            return []
+        vid = extract.find_video_id(result.text, result.url or page_url) or self.video_id(film)
+        posters = extract.find_poster(result.text, result.url or page_url, vid)
+        for embed in extract.find_embed_urls(result.text, result.url or page_url)[:2]:
+            embed_result = net.fetch(self.session, embed, referer=page_url, tries=1)
+            if not embed_result.ok:
+                continue
+            for poster in extract.find_poster(embed_result.text, embed_result.url or embed, vid):
+                if poster not in posters:
+                    posters.append(poster)
+        return posters
 
     def _try_open(self, cand: Candidate, film: dict, range_header: Optional[str], tried: list):
         if self.host_blocked(cand.url):

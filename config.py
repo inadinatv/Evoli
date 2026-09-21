@@ -50,6 +50,32 @@ MAX_PROXY_CANDIDATES = 14      # tek bir /stream isteğinde denenecek kaynak say
 MAX_RESOLVE_CANDIDATES = 14    # doğrulama/onarım sırasında denenecek kaynak sayısı
 
 # --------------------------------------------------------------------------- #
+# CORS / proxy engellerini aşma
+# --------------------------------------------------------------------------- #
+# 1) Tarayıcı -> Evoli: /proxy?url=... genel vekil sunucusu herhangi bir uzak
+#    kaynağı kendi origin'imizden servis eder (CORS, hotlink koruması, karışık
+#    içerik engelleri tarayıcıda hiç oluşmaz).  SSRF koruması: özel/yerel IP'ye
+#    giden hedefler reddedilir — kendi ağında 127.0.0.1 hedeflerini de vekletmek
+#    istersen bunu 1 yap.
+PROXY_ALLOW_PRIVATE = False
+PROXY_MAX_REDIRECTS = 5
+
+# 2) Evoli -> internet: ISP/ülke/DNS engeline takılırsan istekleri bir çıkış
+#    proxy'sinden geçirebilirsin.  http://, https:// veya socks5:// kabul eder
+#    (socks5 için: pip install PySocks).  Örn: EVOLI_UPSTREAM_PROXY="socks5://127.0.0.1:1080"
+UPSTREAM_PROXY = ""
+
+# 3) HLS oynatma için hls.js kütüphanesi.  Sunucu önce /hls.js ile kendi
+#    origin'inden servis eder (uzak CDN engelli olsa bile çalışır); buradaki
+#    adresler sunucunun kendi indirme yedekleridir.
+HLSJS_SOURCES = [
+    "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js",
+    "https://unpkg.com/hls.js@1.5.17/dist/hls.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js",
+]
+HLSJS_CACHE_TTL = 6 * 3600
+
+# --------------------------------------------------------------------------- #
 # Tarama / keşif
 # --------------------------------------------------------------------------- #
 SCAN_INTERVAL_HOURS = 6
@@ -102,6 +128,16 @@ CDN_POSTER_TEMPLATES = [
     "https://{host}/thumbs/{id}.jpg",
     "https://{host}/{id}.jpg",
 ]
+
+# Afiş (poster) olarak kullanılamayacak "jenerik" görsel adları: sitenin
+# logosu vb. sayfadaki ilk görsel genelde bunlar oluyor ve 1000+ filmde aynı
+# logo afişmiş gibi kaydediliyordu.  Bunlar reddedilir; gerçek afiş (uploads,
+# CDN img/{id}.jpg, oynatıcıdaki image:) tercih edilir.
+BAD_POSTER_HINTS = (
+    "logo", "favicon", "apple-touch", "site-icon", "siteicon", "banner",
+    "placeholder", "default", "no-image", "noimage", "noimg", "blank",
+    "spacer", "loading", "dummy", "1x1", "header", "footer", "avatar",
+)
 
 VERIFY_STREAMS = True          # tarama sırasında kaynakları doğrula
 VERIFY_SAMPLE = 60             # her taramada doğrulanacak film sayısı (0 = hepsi)

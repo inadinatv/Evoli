@@ -558,7 +558,7 @@ img{max-width:100%}
   <div class="player-container" id="player-container">
     <div class="player-main">
       <div class="video-stage" id="video-stage">
-        <video id="player" playsinline preload="metadata" crossorigin="anonymous"></video>
+        <video id="player" playsinline preload="metadata"></video>
         <div class="video-loader" id="video-loader"><div class="spinner"></div></div>
         <div class="video-error" id="video-error">
           <div class="ve-box">
@@ -915,10 +915,19 @@ function showMore(){
   } else wrap.classList.add('hidden');
 }
 function imgFail(el,direct,alt){
+  /* Kademeli kapak kurtarma: /poster → doğrudan adres → /proxy vekili
+     (hotlink koruması / CORS / karışık içerik engelleri aşılır) */
+  const chain = [];
+  if(direct) chain.push(direct);
+  if(alt && alt!==direct) chain.push(alt);
+  if(MEDIA_PROXY && direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(direct)}`);
+  if(MEDIA_PROXY && alt && alt!==direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(alt)}`);
   const step = parseInt(el.dataset.fb||"0",10);
-  const next = [direct, alt].filter(u=> u && u!==el.src)[0];
+  const tried = el.dataset.tried ? el.dataset.tried.split('\u0001') : [];
+  const next = chain.find(u=> u && u!==el.src && !tried.includes(u));
   if(next){
     el.dataset.fb = String(step+1);
+    tried.push(next); el.dataset.tried = tried.join('\u0001');
     el.onerror = ()=> imgFail(el, direct, alt);
     el.src = next;
     return;
@@ -946,10 +955,13 @@ function updatePlayerFav(){
 /* PLAYER LOGIC */
 /* Kaynak yönetimi: /stream/<id> sunucu tarafında çok adaylı çözülür.
    Yine de başarısız olursa burada kademeli kurtarma çalışır:
-   1) HLS mi diye bak (hls.js devreye girer)
+   1) HLS mi diye bak (hls.js — önce kendi /hls.js origin'imizden, uzak CDN
+      engelli olsa bile çalışır)
    2) sunucudan taze kaynak iste (/api/resolve?refresh=1) ve yeniden dene
-   3) hepsi biterse teşhis bilgisiyle hata ekranı göster */
-const MAX_SRC_ATTEMPTS = 3;
+   3) son çare: genel /proxy vekilimizle doğrudan video adresini akıt
+   4) hepsi biterse teşhis bilgisiyle hata ekranı göster */
+const MAX_SRC_ATTEMPTS = 4;           // 0-2: /stream yedeği • 3: /proxy son çare
+const PROXY_ATTEMPT = 3;
 let srcAttempt = 0, hlsInst = null, hlsLoading = null, resolving = false;
 
 const video = document.getElementById('player');
@@ -1078,6 +1090,12 @@ function seekTo(percent){
 
 /* --- kaynak yükleme / kurtarma ------------------------------------- */
 function streamSrc(film, attempt){
+  // Son çare: genel /proxy vekili — kaynak çözücü bulamasa bile doğrudan
+  // video adresi (film.stream) gerekli Referer/UA ile akıtılır.
+  if(attempt >= PROXY_ATTEMPT && MEDIA_PROXY && film.stream){
+    const ref = film.ref || film.embed || film.url || '';
+    return `${MEDIA_PROXY}/proxy?url=${encodeURIComponent(film.stream)}&ref=${encodeURIComponent(ref)}`;
+  }
   const base = mediaUrl(film, 'stream');
   return attempt ? `${base}?retry=${attempt}&t=${Date.now()}` : base;
 }
@@ -1108,13 +1126,26 @@ function attachSource(film, attempt){
 function loadHlsJs(){
   if(window.Hls) return Promise.resolve(window.Hls);
   if(hlsLoading) return hlsLoading;
+  // Önce kendi origin'imiz (/hls.js — sunucu kendi yedeklerinden indirir),
+  // olmazsa birden fazla CDN: tek bir engelli ağ HLS'i tamamen öldürmesin.
+  const HLSJS_SRCS = [
+    `${MEDIA_PROXY}/hls.js`,
+    'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js',
+    'https://unpkg.com/hls.js@1.5.17/dist/hls.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js',
+  ].filter(u=> u && u!=='/hls.js' || MEDIA_PROXY);
   hlsLoading = new Promise((resolve,reject)=>{
-    const tag = document.createElement('script');
-    tag.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
-    tag.async = true;
-    tag.onload = ()=> resolve(window.Hls);
-    tag.onerror = ()=> reject(new Error('hls.js indirilemedi'));
-    document.head.appendChild(tag);
+    let i = 0;
+    const tryNext = ()=>{
+      if(i >= HLSJS_SRCS.length){ hlsLoading = null; reject(new Error('hls.js indirilemedi')); return; }
+      const tag = document.createElement('script');
+      tag.src = HLSJS_SRCS[i++];
+      tag.async = true;
+      tag.onload = ()=>{ window.Hls ? resolve(window.Hls) : tryNext(); };
+      tag.onerror = tryNext;
+      document.head.appendChild(tag);
+    };
+    tryNext();
   });
   return hlsLoading;
 }
@@ -1156,10 +1187,15 @@ async function handleSourceError(){
   }
 
   // 2) sunucudan taze kaynak çözümü iste, sonra tekrar dene
-  if(srcAttempt < MAX_SRC_ATTEMPTS){
+  if(srcAttempt+1 < MAX_SRC_ATTEMPTS){
     srcAttempt += 1;
-    setSourceStatus(`yedek kaynak ${srcAttempt}/${MAX_SRC_ATTEMPTS}…`);
-    toast(`📡 Kaynak yenileniyor (${srcAttempt}/${MAX_SRC_ATTEMPTS})…`);
+    if(srcAttempt >= PROXY_ATTEMPT){
+      setSourceStatus('genel vekil (son çare)…');
+      toast('📡 Genel vekil üzerinden deneniyor…');
+    } else {
+      setSourceStatus(`yedek kaynak ${srcAttempt}/${PROXY_ATTEMPT}…`);
+      toast(`📡 Kaynak yenileniyor (${srcAttempt}/${PROXY_ATTEMPT})…`);
+    }
     if(!resolving){
       resolving = true;
       try{

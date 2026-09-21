@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import gzip
 import io
+import ipaddress
+import socket
 import ssl
 import time
 from typing import Iterable, Optional
@@ -69,7 +71,17 @@ def make_session(pool_maxsize: int = 16, retries: Optional[int] = None) -> reque
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
     })
     session.trust_env = False  # sistem proxy'leri taramayı bozmasın
+    # Ama kullanıcı EVOLI_UPSTREAM_PROXY ile bilinçli bir çıkış proxy'si verdiyse
+    # (ISP/ülke/DNS engeli vb.) tüm istekler oradan çıkar.
+    proxy = (getattr(config, "UPSTREAM_PROXY", "") or "").strip()
+    if proxy:
+        session.proxies = {"http": proxy, "https": proxy}
+        session.trust_env = False
     return session
+
+
+def upstream_proxy_enabled() -> bool:
+    return bool((getattr(config, "UPSTREAM_PROXY", "") or "").strip())
 
 
 # --------------------------------------------------------------------------- #
@@ -186,6 +198,138 @@ def swap_host(url: str, host: str) -> str:
 
 def host_of(url: str) -> str:
     return (urlparse(url or "").netloc or "").lower()
+
+
+# --------------------------------------------------------------------------- #
+# Genel vekil sunucu (/proxy) güvenlik yardımcıları
+# --------------------------------------------------------------------------- #
+def validate_proxy_url(url: str) -> str:
+    """SSRF koruması: vekletilecek URL'nin şema/host denetimi.
+
+    Dönüş: hata mesajı (boş string = uygun).  ``file://``, ``ftp://``,
+    ``gopher://`` vb. şemalar ve boş/eksik adresler burada reddedilir.
+    """
+    if not url or len(url) > 4000:
+        return "url gerekli"
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        return "sadece http/https desteklenir"
+    if not parsed.hostname:
+        return "geçersiz adres"
+    if parsed.username or parsed.password:
+        return "kimlik bilgili adresler desteklenmiyor"
+    return ""
+
+
+def is_public_host(host: str) -> bool:
+    """Host adı yalnızca genel (internet) IP'lerine mi çözümleniyor?"""
+    if not host:
+        return False
+    host = host.strip("[]").lower()
+    if host in ("localhost", "localhost.localdomain", "ip6-localhost"):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return False
+    return True
+
+
+def proxy_target_allowed(url: str) -> bool:
+    """``/proxy`` için son karar: şema tamam ve (hedef herkese açık ya da
+    ``config.PROXY_ALLOW_PRIVATE`` açık)."""
+    error = validate_proxy_url(url)
+    if error:
+        return False
+    if getattr(config, "PROXY_ALLOW_PRIVATE", False):
+        return True
+    return is_public_host(urlparse(url).hostname or "")
+
+
+class ProxyFetchResult:
+    __slots__ = ("resp", "error", "status", "url")
+
+    def __init__(self, resp=None, error="", status=0, url=""):
+        self.resp = resp
+        self.error = error
+        self.status = status
+        self.url = url
+
+
+def open_proxy_stream(session: requests.Session, url: str,
+                      headers: Optional[dict] = None,
+                      timeout=None,
+                      max_redirects: Optional[int] = None,
+                      require_public: bool = True) -> ProxyFetchResult:
+    """Genel vekil için güvenli açılış: yönlendirmeler elle takip edilir ve her
+    durakta SSRF denetimi yeniden yapılır (yönlendirme ile özel IP'ye kaçış
+    engellenir).  Açık yanıt (stream) döner."""
+    timeout = timeout or config.TIMEOUT
+    max_redirects = config.PROXY_MAX_REDIRECTS if max_redirects is None else max_redirects
+    current = url
+    seen = set()
+    for _hop in range(max(1, max_redirects + 1)):
+        if require_public and not proxy_target_allowed(current):
+            return ProxyFetchResult(error="hedef adres engellendi (özel ağ / geçersiz url)", url=current)
+        if current in seen:
+            return ProxyFetchResult(error="yönlendirme döngüsü", url=current)
+        seen.add(current)
+        try:
+            resp = session.get(current, headers=headers or {}, stream=True, verify=False,
+                               allow_redirects=False, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001
+            return ProxyFetchResult(error=repr(exc)[:160], url=current)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location") or ""
+            resp.close()
+            if not location:
+                return ProxyFetchResult(error="yönlendirme eksik", status=302, url=current)
+            current = urljoin(current, location)
+            continue
+        return ProxyFetchResult(resp=resp, status=resp.status_code, url=current)
+    return ProxyFetchResult(error="çok fazla yönlendirme", url=current)
+
+
+def fetch_bytes(session: requests.Session, url: str, max_bytes: int = 8 * 1024 * 1024,
+                referer: Optional[str] = None, timeout=None) -> tuple:
+    """Küçük ikili gövde indir (hls.js, görsel doğrulama vb. için).
+
+    Dönüş: ``(bytes|None, content_type, error)``.
+    """
+    headers = browser_headers(referer=referer, accept="*/*")
+    result = open_proxy_stream(session, url, headers=headers, timeout=timeout,
+                               require_public=False)
+    if result.resp is None:
+        return None, "", result.error
+    resp = result.resp
+    try:
+        ctype = resp.headers.get("Content-Type") or ""
+        if resp.status_code not in (200, 206):
+            return None, ctype, f"HTTP {resp.status_code}"
+        buf = io.BytesIO()
+        size = 0
+        for chunk in resp.iter_content(65536):
+            if not chunk:
+                continue
+            size += len(chunk)
+            if max_bytes and size > max_bytes:
+                return None, ctype, "boyut sınırı aşıldı"
+            buf.write(chunk)
+        return buf.getvalue(), ctype, ""
+    except Exception as exc:  # noqa: BLE001
+        return None, "", repr(exc)[:160]
+    finally:
+        resp.close()
 
 
 class FetchResult:

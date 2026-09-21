@@ -1,8 +1,29 @@
-# 🎬 EVOLI Premium • v6
+# 🎬 EVOLI Premium • v6.1
 
 Netflix tarzı arayüz + kendi kendini onaran video kaynağı çözümü + tam arşiv
-taraması. Bu sürümün tek odağı: **kataloğun tamamı bulunsun ve bulunan her
-film oynasın.**
+taraması + **CORS/proxy engellerini aşan katman**. Tek odağı: **kataloğun
+tamamı bulunsun, kapaklar gerçek olsun ve bulunan her film sorunsuz oynasın.**
+
+---
+
+## 🆚 v6.1'de eklenen: CORS / proxy engellerini aşma katmanı
+
+| Katman | Ne yapar | Nerede |
+|--------|----------|--------|
+| **Genel vekil `/proxy?url=…&ref=…`** | Herhangi bir uzak kaynağı (video, görsel, JSON, JS) sunucumuz üzerinden akıtır: CORS, hotlink koruması, karışık içerik engelleri tarayıcıda hiç oluşmaz | `server.py` — SSRF korumalı (özel ağ hedefleri varsayılan kapalı, `EVOLI_PROXY_ALLOW_PRIVATE=1` ile açılır) |
+| **Aynı origin `/hls.js`** | Oynatıcının uzak CDN'e (jsdelivr vb.) bağımlılığı bitti; hls.js önce kendi origin'imizden servis edilir, olmazsa 3 CDN denenir | `index.html` + `server.py` |
+| **Çıkış proxy'si** | Evoli'nin kendisi bir ISP/ülke/DNS engeline takılıysa: `EVOLI_UPSTREAM_PROXY="socks5://127.0.0.1:1080"` (veya `http://…`) ile tüm dış istekler vekilden çıkar | `config.py` → `net.py` |
+| **CORS başlıkları** | Tüm yanıtlarda `Access-Control-Allow-Origin: *`, preflight yankılama, `Cross-Origin-Resource-Policy: cross-origin`, `Access-Control-Allow-Private-Network` | `server.py` |
+| **Oynatıcı yedekleri** | `/stream` → taze çözüm → **`/proxy` ile doğrudan video** (son çare). Kapaklarda `/poster` → doğrudan adres → `/proxy` zinciri | `index.html` |
+| **`crossorigin="anonymous"` kaldırıldı** | Doğrudan CDN kaynağına düşen oynatma (fallback) artık CORS başlığı beklemez | `index.html` |
+
+## 🖼 v6.1'de eklenen: gerçek kapaklar + doğru kategoriler
+
+| Sorun | Eski davranış | Yeni davranış |
+|-------|---------------|---------------|
+| **Logo sahte afiş** | Sitenin `og:image`'i çoğu zaman `logo1.png` → 1114 filmde aynı logo afişti | Logo/favicon/yer tutucu görseller afiş adayı reddedilir; gerçek afiş (uploads / oynatıcı `image:` / CDN `img/{id}.jpg`) doğrulanarak kaydedilir |
+| **Kategori çorbası** | Menüdeki 52 kategori film sayfasında da olduğu için HER filme 52 kategori yazılıyor, filtre anlamsızdı | Film kaydı `scope="content"` ile yalnızca içeriğe ait kategorilerden (nav/yan sütun atlanır, `rel="category"` öncelikli) doldurulur |
+| **Toplu onarım** | — | `python bot.py covers` → REST ile kategoriler + doğrulanmış afişler tek geçişte düzeltilir; arayüzden 🛠 ya da `/api/repair?posters=1` |
 
 ---
 
@@ -43,6 +64,7 @@ python bot.py server     # sadece sunucu (arayüz + video proxy)
 python bot.py scan       # hızlı güncelleme: yeni filmler
 python bot.py full       # tam arşiv: sitemap'teki tüm filmler
 python bot.py repair     # oynamayan kaynakları yeniden çöz
+python bot.py covers     # logo afişleri + yanlış kategorileri düzelt
 python bot.py status     # katalog özeti
 python bot.py auto       # tara + sunucu + 6 saatte bir otomatik tarama
 ```
@@ -57,6 +79,7 @@ Menü:
 5) Kaynakları Onar       — oynamayan videoları yeniden çöz
 6) Katalog Durumu        — özet + CDN/site bilgisi
 7) Kataloğu Taşı         — eski films.json'u yeni şemaya çevir
+8) Kapak & Kategori Onar — logo afişleri/yanlış kategorileri düzelt
 ```
 
 ## 🔗 Erişim
@@ -70,8 +93,11 @@ Menü:
 | Özet | `/api/stats` • `/api/status` • `/api/meta` |
 | Kaynak çözme | `/api/resolve/<id>?refresh=1&debug=1` |
 | Toplu onarım | `/api/repair?limit=200` • durum: `/api/repair/status` |
+| Kapak/kategori onarımı | `/api/repair?posters=1` (ya da `?kind=covers`) |
 | Tek film sağlık kontrolü | `/api/health/<id>` |
 | Video / afiş | `/stream/<id>` • `/poster/<id>` • HLS: `/hls/<id>/<n>` |
+| **Genel vekil (CORS kırıcı)** | `/proxy?url=<encoded>&ref=<encoded>` — herhangi bir kaynak |
+| **hls.js (aynı origin)** | `/hls.js` — uzak CDN engelli olsa bile HLS çalışır |
 | M3U (harici oynatıcı) | `/m3u` — UA + Referer gömülü |
 | M3U (proxy, en garantili) | `/playlist_local.m3u` — VLC/TV'de bunu kullan |
 
@@ -111,6 +137,9 @@ Tüm ayarlar `EVOLI_<ADI>` ortam değişkeniyle geçersiz kılınabilir
 | `VERIFY_STREAMS` / `VERIFY_SAMPLE` | `True` / 60 | Taramada kaç kaynak doğrulansın |
 | `EMULATE_RANGE` | `True` | Upstream Range desteklemiyorsa sunucu taklit etsin |
 | `CACHE_TTL_OK` / `CACHE_TTL_FAIL` | 12 saat / 10 dk | Çözüm önbelleği geçerlilik süreleri |
+| `UPSTREAM_PROXY` | boş | Çıkış proxy'si (`http://…` / `https://…` / `socks5://…`; socks için `pip install PySocks`) |
+| `PROXY_ALLOW_PRIVATE` | `False` | `/proxy` ile özel/yerel ağ hedefleri vekletilsin mi (SSRF) |
+| `HLSJS_SOURCES` | 3 CDN | `/hls.js` sunucusunun indirme yedekleri |
 | `PORT`, `SCAN_INTERVAL_HOURS`, `REQUEST_DELAY` | 8000, 6, 0.15 | — |
 
 ## 🧪 Testler
@@ -123,23 +152,24 @@ sayfası, ölü CDN alan adı, HLS yayını, sitemap + REST + kategori sayfalar�
 python -m unittest discover -s tests -t . -v
 ```
 
-33 test şunları doğrular: keşif (sitemap/REST/crawl + sayfalama düzeltmesi),
+43 test şunları doğrular: keşif (sitemap/REST/crawl + sayfalama düzeltmesi),
 kaynak çıkarma, Referer/CDN yedekleme, aday sırası (önbellek → kayıtlı →
 şablon), erişilemeyen ağda kayıtların bozuk işaretlenmemesi, devre kesici,
 aralık taklidi (206), HEAD, poster, HLS yeniden yazımı, onarım, API uçları,
-çift kayıt engelleme.
+çift kayıt engelleme, **logo afiş reddi, kategori çorbası düzeltmesi, `/proxy`
+CORS vekili (SSRF koruması dahil), aynı origin `/hls.js`, kapak onarım işi**.
 
 ## 📁 Dosyalar
 
 ```
 bot.py       giriş noktası (menü + CLI + zamanlayıcı)
 config.py    tüm ayarlar (ortam değişkeniyle geçersiz kılınabilir)
-net.py       HTTP katmanı: toleranslı TLS, tekrar deneme, başlık adayları
-extract.py   HTML/XML ayrıştırma: medya, gömme, id, afiş, kategori, sitemap
-resolver.py  ★ çalışan video adresini bulur (çok adaylı, önbellekli, onarım)
-scraper.py   keşif + film çıkarma + doğrulama + katalog/M3U üretimi
-server.py    arayüz, API ve video/afiş/HLS proxy'si
-index.html   premium arayüz + dayanıklı oynatıcı
+net.py       HTTP katmanı: toleranslı TLS, tekrar deneme, başlık adayları, çıkış proxy'si, SSRF denetimi
+extract.py   HTML/XML ayrıştırma: medya, gömme, id, afiş (logo reddi), kategori, sitemap
+resolver.py  ★ çalışan video/afiş adresini bulur (çok adaylı, önbellekli, onarım)
+scraper.py   keşif + film çıkarma + doğrulama + katalog/M3U üretimi + fix_metadata (kapak/kategori)
+server.py    arayüz, API, /proxy CORS vekili ve video/afiş/HLS/hls.js proxy'si
+index.html   premium arayüz + dayanıklı oynatıcı (çok yedekli kaynak zinciri)
 tests/       sahte site + uçtan uca testler
 films.json   katalog (üretilir)         media_cache.json  çözüm önbelleği (üretilir, git'e girmez)
 playlist.m3u harici oynatıcı listesi    playlist_local.m3u proxy listesi
@@ -155,30 +185,33 @@ playlist.m3u harici oynatıcı listesi    playlist_local.m3u proxy listesi
 | Teşgis panelinde `0 / bağlanılamadı` | Ağ/VPN/DNS engeli. Kayıtlar "bozuk" işaretlenmez, ağ açılınca kendiliğinden çözülür |
 | Katalog eksik görünüyor | `python bot.py full` (sitemap'ten tüm arşiv) |
 | VLC/TV'de oynatmak istiyorum | `http://127.0.0.1:8000/playlist_local.m3u` (Referer/UA derdi yok) |
+| Kapaklar hep aynı logo | `python bot.py covers` — gerçek afişler tek tek doğrulanıp düzeltilir |
+| Kategori seçince hep aynı filmler | `python bot.py covers` — kategori çorbası REST ile temizlenir |
+| Tarayıcı konsolunda CORS hatası | Kaynağı `/proxy?url=…` üzerinden iste; sunucu tüm yanıtlara CORS başlığı ekler |
+| HLS oynatılmıyor + "hls.js indirilemedi" | Ağ CDN'leri engelliyor; `/hls.js` sunucu yedeklerinden indirir, `EVOLI_UPSTREAM_PROXY` ile çıkış proxy'si verebilirsin |
 | Arayüz yavaş açılıyor | `films.json` gzip ile servis edilir; büyük katalogda `/api/films?limit=48` kullan |
 
 ## 🔁 Bakım / GitHub Actions
 
-Depoda 6 saatte bir çalışan `update.yml` iş akışı var: testleri çalıştırır, tam
-tarama yapar, `films.json` + `playlist.m3u` + `playlist_local.m3u` değiştiyse
-commit eder. Tarama sırasında akış doğrulaması kapatılır (`EVOLI_VERIFY_STREAMS=0`):
-GitHub sunucularının IP'leri çoğu zaman CDN tarafından engellenir ve bu, çalışan
-kayıtları yanlışlıkla "bozuk" gösterebilir. Doğrulama kendi makinende
-`python bot.py repair` ile yapılır.
+Depoda 6 saatte bir katalog güncelleyen `update.yml` iş akışı var.  **Testleri
+koşturan sürümlü iş akışı** `docs/ci-update.yml.txt` içinde hazır duruyor
+(taramadan önce 43 testi koşuturur, runner IP'lerinde doğrulamayı kapatarak
+yanlış "bozuk" işaretlemeleri önler).  GitHub App'in `workflows` izni olmadığı
+için bu dosya repodaki `.github/workflows/update.yml`'e elle kopyalanmalı:
 
-> **Not:** Güncellenmiş iş akışı bu depoda `docs/ci-update.yml.txt` olarak duruyor.
-> `.github/workflows/` altına yazmak GitHub App'te `workflows` izni gerektirdiği
-> için o değişikliği kendin uygulaman gerekiyor:
->
-> ```bash
-> cp docs/ci-update.yml.txt .github/workflows/update.yml
-> git add .github/workflows/update.yml
-> git commit -m "ci: run tests, skip stream verification on runner IPs"
-> git push
-> ```
->
-> (Alternatif: Arena GitHub App'ine repo ayarlarından `Workflows: Read and write`
-> izni verirsen bunu ben de push edebilirim.)
+```bash
+cp docs/ci-update.yml.txt .github/workflows/update.yml
+git add .github/workflows/update.yml
+git commit -m "ci: run tests before catalog update"
+git push
+```
+
+(Alternatif: GitHub App'e repo ayarlarından `Workflows: Read and write` izni
+verirsen bu kopyalamayı ben de yapabilirim.)
+
+Katalogda logo afişler/çorba kategoriler biriktiyse (eski sürümden kalma) bir
+kez `python bot.py covers` çalıştır — REST ile kategoriler, doğrulanmış afişlerle
+kapaklar tek seferde düzeltilir.
 
 ## Klavye kısayolları
 

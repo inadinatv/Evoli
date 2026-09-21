@@ -50,6 +50,9 @@ RESOLVE_LOCKS_GUARD = threading.Lock()
 JSON_CT = "application/json; charset=utf-8"
 COMPRESSIBLE = ("application/json", "text/", "audio/x-mpegurl", "application/x-mpegurl", "image/svg+xml")
 
+HLSJS_CACHE: dict = {"data": None, "ts": 0.0}
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
+
 
 # --------------------------------------------------------------------------- #
 # Veritabanı erişimi
@@ -180,8 +183,12 @@ class Handler(BaseHTTPRequestHandler):
         headers = {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-            "Access-Control-Allow-Headers": "Range, Content-Type, If-None-Match",
-            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, X-Evoli-Source",
+            "Access-Control-Allow-Headers": "Range, Content-Type, If-None-Match, If-Modified-Since",
+            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, X-Evoli-Source, X-Evoli-Upstream",
+            # Sayfamız başka sitelere gömülüyorsa / doğrudan kaynak oynatılıyorsa
+            # tarayıcı kaynak engeline (CORP/CORB) takılmamalı:
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Access-Control-Allow-Private-Network": "true",
         }
         if cache:
             headers["Cache-Control"] = "public, max-age=60"
@@ -228,7 +235,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, JSON_CT, body, extra=extra, cache=cache, head_only=head_only)
 
     def do_OPTIONS(self):
-        self._send(204, "text/plain", b"", cache=False)
+        # Tarayıcının istediği başlıkları yankıla (preflight her zaman geçsin).
+        requested = (self.headers.get("Access-Control-Request-Headers") or "").strip()
+        extra = {}
+        if requested:
+            extra["Access-Control-Allow-Headers"] = requested
+        self._send(204, "text/plain", b"", cache=False, extra=extra)
 
     def do_HEAD(self):
         self.do_GET()
@@ -244,6 +256,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "", "/index.html"):
                 return self.serve_file(config.BASE_DIR + "/index.html", head_only, cache=False)
+
+            if path == "/proxy":
+                return self.api_proxy(query, head_only)
+            if path in ("/hls.js", "/hls.min.js"):
+                return self.serve_hlsjs(head_only)
 
             if path == "/api/films":
                 return self.api_films(query, head_only)
@@ -382,20 +399,28 @@ class Handler(BaseHTTPRequestHandler):
         if action == "status":
             with JOB_LOCK:
                 return self._json(200, dict(JOB), head_only=head_only)
-        with JOB_LOCK:
-            if JOB["running"]:
-                return self._json(200, {"started": False, "reason": "zaten çalışıyor", **JOB}, head_only=head_only)
-            JOB.update({"running": True, "kind": "repair", "started": time.strftime("%H:%M:%S"),
-                        "finished": "", "result": None, "error": ""})
         try:
             limit = int((query.get("limit") or ["0"])[0])
         except ValueError:
             limit = 0
         only_broken = (query.get("all") or ["0"])[0] not in ("1", "true", "yes")
+        kind_req = (query.get("kind") or [""])[0].strip().lower()
+        is_meta = (kind_req in ("posters", "covers", "metadata", "fixmeta", "kapak")
+                   or "posters" in query or "covers" in query)
+        job_kind = "metadata" if is_meta else "repair"
+        with JOB_LOCK:
+            if JOB["running"]:
+                return self._json(200, {"started": False, "reason": "zaten çalışıyor", **JOB}, head_only=head_only)
+            JOB.update({"running": True, "kind": job_kind, "started": time.strftime("%H:%M:%S"),
+                        "finished": "", "result": None, "error": ""})
 
         def run():
             try:
-                result = scraper.repair(limit=limit or None, only_broken=only_broken, verbose=True)
+                if is_meta:
+                    force = (query.get("all") or ["0"])[0] in ("1", "true", "yes")
+                    result = scraper.fix_metadata(limit=limit or None, force=force, verbose=True)
+                else:
+                    result = scraper.repair(limit=limit or None, only_broken=only_broken, verbose=True)
                 with JOB_LOCK:
                     JOB.update({"running": False, "finished": time.strftime("%H:%M:%S"), "result": result})
                 get_db(force=True)
@@ -404,7 +429,8 @@ class Handler(BaseHTTPRequestHandler):
                     JOB.update({"running": False, "finished": time.strftime("%H:%M:%S"), "error": repr(exc)[:200]})
 
         threading.Thread(target=run, daemon=True).start()
-        return self._json(202, {"started": True, "limit": limit, "only_broken": only_broken}, head_only=head_only)
+        return self._json(202, {"started": True, "limit": limit, "kind": job_kind,
+                                "only_broken": only_broken}, head_only=head_only)
 
     def api_health(self, key: str, head_only: bool):
         """/api/health -> genel durum; /api/health/<id> -> tek filmin kaynağı."""
@@ -436,6 +462,115 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"ok": bool(result.get("ok")), "kind": result.get("kind"),
                                 "url": result.get("url"), "status": result.get("status"),
                                 "tried": result.get("tried", [])[-6:]}, head_only=head_only)
+
+    # ------------------------------------------------------------------ #
+    # CORS / proxy engellerini aşma: genel vekil + aynı origin hls.js
+    # ------------------------------------------------------------------ #
+    def api_proxy(self, query: dict, head_only: bool):
+        """/proxy?url=... [&ref=...]
+
+        Tarayıcıdaki CORS / hotlink / karışık içerik engellerini tamamen
+        ortadan kaldırır: uzak kaynak sunucumuz üzerinden (gereken Referer /
+        User-Agent / Range başlıklarıyla) akıtılır, yanıt kendi origin'imiz +
+        ``Access-Control-Allow-Origin: *`` ile döner.  SSRF koruması aktiftir
+        (özel ağ hedefleri ``PROXY_ALLOW_PRIVATE`` kapalıyken reddedilir).
+        """
+        url = (query.get("url") or [""])[0].strip()
+        ref = (query.get("ref") or [""])[0].strip()
+        ua = (query.get("ua") or [""])[0].strip() or None
+        error = net.validate_proxy_url(url)
+        if error:
+            return self._json(400, {"ok": False, "error": error}, head_only=head_only)
+        require_public = not getattr(config, "PROXY_ALLOW_PRIVATE", False)
+        if require_public and not net.is_public_host(urlparse(url).hostname or ""):
+            return self._json(403, {"ok": False, "error": "özel/yerel hedefler vekletilemez"},
+                             head_only=head_only)
+        headers = net.browser_headers(
+            referer=ref or None,
+            ua=ua,
+            range_header=self.headers.get("Range"),
+            accept=self.headers.get("Accept") or "*/*",
+        )
+        for hdr in ("If-None-Match", "If-Modified-Since", "If-Range"):
+            value = self.headers.get(hdr)
+            if value:
+                headers[hdr] = value
+        result = net.open_proxy_stream(RESOLVER.session, url, headers=headers,
+                                       require_public=require_public)
+        if result.resp is None:
+            return self._json(502, {"ok": False, "error": result.error or "uzak sunucuya ulaşılamadı",
+                                    "url": url}, head_only=head_only)
+        resp = result.resp
+        try:
+            ctype = resp.headers.get("Content-Type") or "application/octet-stream"
+            status = resp.status_code
+            extra = {"X-Evoli-Proxy": "1", "X-Evoli-Upstream": net.host_of(result.url),
+                     "Cache-Control": resp.headers.get("Cache-Control") or "no-cache"}
+            for hdr in ("Content-Length", "Content-Range", "Accept-Ranges", "ETag",
+                        "Last-Modified", "Content-Disposition", "Content-Type"):
+                if hdr == "Content-Type":
+                    continue
+                if resp.headers.get(hdr):
+                    extra[hdr] = resp.headers.get(hdr)
+            want_close = (not extra.get("Content-Length")) or self._client_wants_close()
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
+            self.send_header("Access-Control-Expose-Headers",
+                             "Content-Length, Content-Range, Accept-Ranges, X-Evoli-Proxy, X-Evoli-Upstream")
+            for key, value in extra.items():
+                if value is not None:
+                    self.send_header(key, str(value))
+            if want_close:
+                self.send_header("Connection", "close")
+                self.close_connection = True
+            self.end_headers()
+            if head_only:
+                return
+            for chunk in resp.iter_content(config.PROXY_CHUNK):
+                if not chunk:
+                    continue
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            self.close_connection = True
+        except Exception:  # noqa: BLE001
+            self.close_connection = True
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+
+    def serve_hlsjs(self, head_only: bool):
+        """/hls.js — hls.js kütüphanesini kendi origin'imizden servis eder.
+
+        Oynatıcının uzak CDN'e (jsdelivr vb.) bağımlılığını kaldırır: engelli
+        ağlarda bile HLS oynatma çalışır.  İlk istekten sonra bellekte
+        saklanır; sunucu kendi indirme yedeklerini (config.HLSJS_SOURCES) dener.
+        """
+        cached = None
+        with HLS_LOCK:
+            if HLSJS_CACHE["data"] and time.time() - HLSJS_CACHE["ts"] < getattr(config, "HLSJS_CACHE_TTL", 21600):
+                cached = HLSJS_CACHE["data"]
+        data = cached
+        if not data:
+            for src in getattr(config, "HLSJS_SOURCES", []) or []:
+                body, _ctype, _err = net.fetch_bytes(RESOLVER.session, src, max_bytes=4 * 1024 * 1024)
+                if body and len(body) > 8 and not body.lstrip().startswith((b"<", b"{")):
+                    data = body
+                    break
+            if data:
+                with HLS_LOCK:
+                    HLSJS_CACHE["data"] = data
+                    HLSJS_CACHE["ts"] = time.time()
+        if not data:
+            return self._json(502, {"ok": False,
+                                    "error": "hls.js indirilemedi (uzak CDN'ler engelli olabilir)"},
+                              head_only=head_only)
+        return self._send(200, "application/javascript; charset=utf-8", data,
+                          extra={"X-Evoli-Source": "hlsjs-cache" if cached else "hlsjs-fetch"},
+                          cache=True, head_only=head_only)
 
     # ------------------------------------------------------------------ #
     # Statik
@@ -528,52 +663,96 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def proxy_poster(self, film: dict, head_only: bool):
-        candidates = []
-        for key in ("poster", "poster_alt"):
-            value = film.get(key)
-            if value and value.startswith("http"):
-                candidates.append(value)
-        vid = str(film.get("video_id") or film.get("id") or "")
-        if vid.isdigit():
-            for host in RESOLVER.cdn_hosts(film)[:3]:
-                for template in config.CDN_POSTER_TEMPLATES:
-                    url = template.format(host=host, id=vid)
-                    if url not in candidates:
-                        candidates.append(url)
-        referers = [r for r in net.referer_candidates(film, RESOLVER.meta) if r][:2] or [None]
-        for url in candidates[:8]:
-            for referer in referers:
-                headers = net.browser_headers(referer=referer, accept="image/*,*/*;q=0.8")
-                for hdr in ("If-None-Match", "If-Modified-Since"):
-                    value = self.headers.get(hdr)
-                    if value:
-                        headers[hdr] = value
-                try:
-                    resp = RESOLVER.session.get(url, headers=headers, stream=True, verify=False,
-                                                timeout=config.PROBE_TIMEOUT, allow_redirects=True)
-                except Exception:
+    def _fetch_image(self, url: str, referer):
+        """Tek adaydan tam görsel gövdesi indirir ve doğrular.
+
+        Dönüş: ``(data, ctype, status, extra)`` — data ``None`` ise aday
+        görsel değil/erişilemedi; status 304 ise data boş string'dir.
+        """
+        headers = net.browser_headers(referer=referer or None, accept="image/*,*/*;q=0.8")
+        for hdr in ("If-None-Match", "If-Modified-Since"):
+            value = self.headers.get(hdr)
+            if value:
+                headers[hdr] = value
+        try:
+            resp = RESOLVER.session.get(url, headers=headers, stream=True, verify=False,
+                                        timeout=config.PROBE_TIMEOUT, allow_redirects=True)
+        except Exception:  # noqa: BLE001
+            return None, "", 0, {}
+        try:
+            status = resp.status_code
+            if status == 304:
+                extra = {"Cache-Control": "public, max-age=86400"}
+                for hdr in ("ETag", "Last-Modified"):
+                    if resp.headers.get(hdr):
+                        extra[hdr] = resp.headers.get(hdr)
+                return b"", resp.headers.get("Content-Type") or "image/jpeg", 304, extra
+            rheaders = dict(resp.headers)
+            head = b""
+            chunks = []
+            size = 0
+            for chunk in resp.iter_content(65536):
+                if not chunk:
                     continue
-                if resp.status_code == 304:
-                    extra = {"Cache-Control": "public, max-age=86400"}
-                    for hdr in ("ETag", "Last-Modified"):
-                        if resp.headers.get(hdr):
-                            extra[hdr] = resp.headers.get(hdr)
-                    resp.close()
-                    return self._send(304, "image/jpeg", b"", extra=extra, head_only=head_only)
-                ctype = (resp.headers.get("Content-Type") or "").lower()
-                if resp.status_code == 200 and ctype and not ctype.startswith("text/"):
-                    extra = {"Cache-Control": "public, max-age=86400", "Accept-Ranges": "none"}
-                    for hdr in ("ETag", "Last-Modified"):
-                        if resp.headers.get(hdr):
-                            extra[hdr] = resp.headers.get(hdr)
-                    try:
-                        data = resp.content
-                    finally:
-                        resp.close()
-                    return self._send(200, resp.headers.get("Content-Type") or "image/jpeg", data,
-                                      extra=extra, cache=True, head_only=head_only)
-                resp.close()
+                if not head:
+                    head = chunk[:32]
+                size += len(chunk)
+                if size > MAX_IMAGE_BYTES:
+                    return None, "", status, {}
+                chunks.append(chunk)
+            if not resolver_mod.is_image_response(status, rheaders, head):
+                return None, "", status, {}
+            ctype = rheaders.get("Content-Type") or ""
+            if not ctype or ctype.lower().startswith("text/"):
+                ctype = "image/jpeg"
+            extra = {"Cache-Control": "public, max-age=86400", "Accept-Ranges": "none"}
+            for hdr in ("ETag", "Last-Modified"):
+                if rheaders.get(hdr):
+                    extra[hdr] = rheaders.get(hdr)
+            return b"".join(chunks), ctype, 200, extra
+        finally:
+            resp.close()
+
+    def proxy_poster(self, film: dict, head_only: bool):
+        """Afiş vekili: logo/yer tutucular elenmiş, öncelik sıralı adaylar.
+
+        Önbellek -> film kaydı -> sayfa/ögme görseli -> CDN şablonları.
+        Doğrulanan adres önbelleğe yazılır; sonraki istekler tek atışta döner.
+        """
+        fid = str(film.get("id") or "")
+        item = RESOLVER.get_item(fid) if fid else None
+        candidates = []
+        if item and item.get("poster"):
+            candidates.append((item["poster"], item.get("poster_ref") or None))
+        for pair in RESOLVER.poster_candidates(film):
+            if pair[0] not in [c[0] for c in candidates]:
+                candidates.append(pair)
+        tried = set()
+        for url, referer in candidates[:16]:
+            if url in tried:
+                continue
+            tried.add(url)
+            data, ctype, status, extra = self._fetch_image(url, referer)
+            if data is None:
+                continue
+            if fid and status == 200:
+                RESOLVER.remember_poster(fid, url, referer)
+            return self._send(status, ctype, data, extra=extra, cache=(status == 200),
+                              head_only=head_only)
+        # Son çare: sayfa/ögme görselini indirip dene (logo reddi uygulanmış)
+        referers = [r for r in net.referer_candidates(film, RESOLVER.meta) if r][:3] or [None]
+        for url in RESOLVER.refresh_posters_from_page(film):
+            if url in tried:
+                continue
+            tried.add(url)
+            for referer in referers:
+                data, ctype, status, extra = self._fetch_image(url, referer)
+                if data is None:
+                    continue
+                if fid and status == 200:
+                    RESOLVER.remember_poster(fid, url, referer)
+                return self._send(status, ctype, data, extra=extra, cache=(status == 200),
+                                  head_only=head_only)
         return self._send(404, "text/plain; charset=utf-8", b"poster yok", head_only=head_only)
 
     # ------------------------------------------------------------------ #
@@ -787,6 +966,7 @@ def run(port: int = None, host: str = None, quiet: bool = False):
         print(f"[✓] Arayüz    : http://127.0.0.1:{port}")
         print(f"[✓] Ağ        : http://{ip}:{port}")
         print(f"[✓] M3U       : http://127.0.0.1:{port}/m3u  (harici)  •  /playlist_local.m3u (proxy)")
+        print(f"[✓] CORS vekil: /proxy?url=…&ref=…  •  hls.js: /hls.js")
         print(f"[✓] API       : /api/films • /api/stats • /api/status • /api/resolve/<id> • /api/repair")
         print("")
     try:

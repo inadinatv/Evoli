@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -80,6 +80,10 @@ def patch_config(tmpdir: str, mode: str = "sitemap"):
     config.CACHE_TTL_FAIL = 1
     config.EMULATE_RANGE = True
     config.PORT = 0
+    # CORS/proxy katmanı testleri
+    config.PROXY_ALLOW_PRIVATE = False
+    config.HLSJS_SOURCES = ["http://%s/hls.min.js" % host]
+    config.HLSJS_CACHE_TTL = 3600
 
 
 class PipelineCase(unittest.TestCase):
@@ -93,6 +97,7 @@ class PipelineCase(unittest.TestCase):
         server.RESOLVER = resolver_mod.MediaResolver(cache_file=config.MEDIA_CACHE)
         server._STATE.update({"mtime": 0.0, "size": -1, "db": scraper.empty_db(),
                               "index": {}, "by_url": {}, "loaded_at": 0})
+        server.HLSJS_CACHE.update({"data": None, "ts": 0.0})
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -170,6 +175,56 @@ class TestExtractors(unittest.TestCase):
         self.assertEqual(refs[1], film["url"])
         self.assertIn("", refs)                       # referer'sız deneme listede
         self.assertLess(refs.index(film["embed"]), refs.index(config.REFERER))
+
+    def test_find_poster_rejects_logo_images(self):
+        """"og:image = logo1.png" gerçek sitedeki durum; logo afiş sayılmamalı."""
+        html = ('<meta property="og:image" content="https://site.example/logo1.png">'
+                '<script>player.setup({image:"https:\\/\\/cdn.example.com\\/img\\/358120.jpg"});</script>')
+        posters = extract.find_poster(html, "https://site.example/f/", "358120")
+        self.assertNotIn("https://site.example/logo1.png", posters)
+        self.assertIn("https://cdn.example.com/img/358120.jpg", posters)
+        # yalnız logo varsa afiş boş kalır (1000 filme aynı logo yazılmaz)
+        only = extract.find_poster('<meta property="og:image" content="https://x.example/logo1.png">',
+                                   "https://x.example/f/")
+        self.assertEqual(only, [])
+        self.assertTrue(extract.is_generic_image("https://x.example/wp-content/uploads/logo1.png"))
+        self.assertTrue(extract.is_generic_image("https://x.example/favicon.ico"))
+        self.assertFalse(extract.is_generic_image("https://cdn.example.com/img/358120.jpg"))
+        self.assertFalse(extract.is_generic_image("https://x.example/wp-content/uploads/2026/09/biyoloji.jpg"))
+
+    def test_category_links_content_scope_excludes_nav_sidebar(self):
+        """Menü/yan sütundaki TÜM kategoriler film kaydına basılmamalı."""
+        html = """
+        <nav><a href="/hd-porno-i/">HD</a><a href="/amator-porno-o/">Amatör</a></nav>
+        <aside class="sidebar"><a href="/rus-porno-o/">Rus</a></aside>
+        <div class="cats"><a href="/hd-porno-i/" rel="category tag">HD</a></div>
+        """
+        cats = extract.find_category_links(html, "https://site.example/", scope="content")
+        self.assertEqual(sorted(cats), ["HD"], cats)
+        # rel="category" olmayan içerik bağlantıları da yakalanmalı (tema değişirse)
+        html2 = html.replace(' rel="category tag"', "")
+        cats2 = extract.find_category_links(html2, "https://site.example/", scope="content")
+        self.assertEqual(sorted(cats2), ["HD"], cats2)
+        # keşif kapsamı menüyü de görmeli (kategori sayfaları bulunsun)
+        all_cats = extract.find_category_links(html, "https://site.example/")
+        self.assertIn("Amatör", all_cats)
+        self.assertIn("Rus", all_cats)
+
+    def test_proxy_url_validation(self):
+        self.assertEqual(net.validate_proxy_url("https://cdn.example.com/a.mp4"), "")
+        self.assertTrue(net.validate_proxy_url("javascript:alert(1)"))
+        self.assertTrue(net.validate_proxy_url("file:///etc/passwd"))
+        self.assertTrue(net.validate_proxy_url(""))
+        self.assertTrue(net.validate_proxy_url("https://user:pass@host/x"))
+        # özel ağ hedefleri varsayılan olarak kapalı (DNS'siz, kesin kontroller)
+        self.assertFalse(net.is_public_host("127.0.0.1"))
+        self.assertFalse(net.is_public_host("localhost"))
+        self.assertFalse(net.proxy_target_allowed("http://127.0.0.1/a.mp4"))
+        config.PROXY_ALLOW_PRIVATE = True
+        try:
+            self.assertTrue(net.proxy_target_allowed("http://127.0.0.1/a.mp4"))
+        finally:
+            config.PROXY_ALLOW_PRIVATE = False
 
 
 class TestResolverBehaviour(PipelineCase):
@@ -306,6 +361,39 @@ class TestScanDiscovery(PipelineCase):
         self.assertEqual(scraper.stable_id("a-b-c"), scraper.stable_id("a-b-c"))
         self.assertNotEqual(scraper.stable_id("a-b-c"), scraper.stable_id("x-y-z"))
         self.assertTrue(scraper.stable_id("a").startswith("s"))
+
+    def test_scan_categories_are_per_film(self):
+        """Menüdeki TÜM kategoriler her filme basılmamalı (eski hata: 52 kategori)."""
+        self.scan(mode="sitemap")
+        films, _db = self.load_films()
+        self.assertEqual(sorted(films["300002"]["categories"]), ["HD"],
+                         films["300002"]["categories"])
+        self.assertEqual(sorted(films["300003"]["categories"]), ["Amatör"],
+                         films["300003"]["categories"])
+        self.assertEqual(sorted(films["300001"]["categories"]), ["Amatör", "HD"],
+                         films["300001"]["categories"])
+
+    def test_fix_metadata_repairs_posters_and_categories(self):
+        """Logo afişler + kategori çorbası tek işte düzeltilir."""
+        self.scan(mode="sitemap")
+        films, db = self.load_films()
+        films["300001"]["poster"] = "https://www.evooli.com/logo1.png"
+        films["300001"]["poster_ok"] = False
+        films["300001"]["poster_alt"] = ""
+        films["300002"]["categories"] = ["HD", "Amatör", "Rus"]   # çorba
+        scraper.save_db(db)
+        os.remove(config.MEDIA_CACHE)
+        server.RESOLVER = resolver_mod.MediaResolver(cache_file=config.MEDIA_CACHE)
+
+        stats = scraper.fix_metadata(verbose=False)
+        self.assertGreaterEqual(stats["posters_fixed"], 1, stats)
+        self.assertGreaterEqual(stats["categories_fixed"], 1, stats)
+        films_after, _ = self.load_films()
+        self.assertEqual(films_after["300001"]["poster"], f"{BASE}/img/300001.jpg",
+                         films_after["300001"]["poster"])
+        self.assertNotIn("logo", films_after["300001"]["poster"])
+        self.assertEqual(sorted(films_after["300002"]["categories"]), ["HD"],
+                         films_after["300002"]["categories"])
 
 
 class TestRepair(PipelineCase):
@@ -562,6 +650,86 @@ class TestServerPlayback(PipelineCase):
         self.assertIn(r.status_code, (403, 404))
         r = self.get("/olmayan-dosya.xyz")
         self.assertEqual(r.status_code, 404)
+
+    # ------------------------------------------------------------------ #
+    # CORS / proxy engellerini aşma katmanı
+    # ------------------------------------------------------------------ #
+    def test_proxy_endpoint_streams_media_with_cors(self):
+        """Tarayıcılar için genel vekil: video akışıyor + CORS başlıkları hazır."""
+        config.PROXY_ALLOW_PRIVATE = True
+        url = f"{BASE}/300001.mp4"
+        ref = f"{BASE}/{FILMS[0]['slug']}/"
+        r = self.get(f"/proxy?url={quote(url, safe='')}&ref={quote(ref, safe='')}")
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertEqual(r.content, VIDEO_BODY)
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertEqual(r.headers.get("Cross-Origin-Resource-Policy"), "cross-origin")
+        self.assertEqual(r.headers.get("X-Evoli-Proxy"), "1")
+        # Range ileri/geri sarması da geçmeli
+        r = self.get(f"/proxy?url={quote(url, safe='')}&ref={quote(ref, safe='')}",
+                     headers={"Range": "bytes=1000-1999"})
+        self.assertEqual(r.status_code, 206, r.text[:200])
+        self.assertEqual(r.content, VIDEO_BODY[1000:2000])
+        self.assertIn("Content-Range", r.headers)
+        # Referer'sız istek hotlink korumasına takılır (403 geçmeli, kırılmamalı)
+        r = self.get(f"/proxy?url={quote(url, safe='')}")
+        self.assertEqual(r.status_code, 403)
+        config.PROXY_ALLOW_PRIVATE = False
+
+    def test_proxy_endpoint_blocks_bad_targets(self):
+        config.PROXY_ALLOW_PRIVATE = False
+        for bad in ("javascript:alert(1)", "file:///etc/passwd", "ftp://x/x", ""):
+            r = self.get(f"/proxy?url={quote(bad, safe='')}")
+            self.assertEqual(r.status_code, 400, bad)
+        # özel/yerel ağ hedefleri varsayılan kapalı (SSRF koruması)
+        r = self.get(f"/proxy?url={quote('http://127.0.0.1:9/x.mp4', safe='')}")
+        self.assertIn(r.status_code, (400, 403))
+        r = self.get("/proxy")
+        self.assertEqual(r.status_code, 400)
+        # izin verilirse yerel hedefler vekletilir (test ağı için)
+        config.PROXY_ALLOW_PRIVATE = True
+        r = self.get(f"/proxy?url={quote(f'{BASE}/logo1.png', safe='')}")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b"\x89PNG"))
+        config.PROXY_ALLOW_PRIVATE = False
+
+    def test_hlsjs_served_from_own_origin(self):
+        """Oynatıcı uzak CDN'e bağımlı olmamalı: /hls.js önce kendi origin'inde."""
+        server.HLSJS_CACHE.update({"data": None, "ts": 0.0})
+        r = self.get("/hls.js")
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertIn("javascript", r.headers.get("Content-Type", ""))
+        self.assertIn("Hls", r.text)
+        self.assertEqual(r.headers.get("X-Evoli-Source"), "hlsjs-fetch")
+        # ikinci istek uzak kaynağa tekrar gitmemeli (bellek önbelleği)
+        with STATE.lock:
+            STATE.hits.clear()
+        r2 = self.get("/hls.js")
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.text, r.text)
+        self.assertEqual(STATE.hits.get("/hls.min.js", 0), 0)
+        self.assertEqual(r2.headers.get("X-Evoli-Source"), "hlsjs-cache")
+
+    def test_hlsjs_endpoint_fails_gracefully_when_sources_blocked(self):
+        config.HLSJS_SOURCES = ["http://127.0.0.1:9/hls.min.js"]
+        server.HLSJS_CACHE.update({"data": None, "ts": 0.0})
+        r = self.get("/hls.js")
+        self.assertEqual(r.status_code, 502)
+        self.assertFalse(r.json()["ok"])
+
+    def test_poster_endpoint_skips_logo_and_uses_real_poster(self):
+        films, db = self.load_films()
+        films["300001"]["poster"] = "https://www.evooli.com/logo1.png"
+        films["300001"]["poster_alt"] = ""
+        films["300001"].pop("poster_ok", None)
+        scraper.save_db(db)
+        server.get_db(force=True)
+        server.RESOLVER = resolver_mod.MediaResolver(cache_file=config.MEDIA_CACHE)
+
+        r = self.get("/poster/300001")
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertEqual(r.content, POSTER_BODY)
+        self.assertIn("image", r.headers.get("Content-Type", ""))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@
     python bot.py full         # tam arşiv taraması (sitemap + REST)
     python bot.py server       # sadece sunucu
     python bot.py repair       # ölü/çalışmayan video kaynaklarını onar
+    python bot.py covers       # logo afişleri + yanlış kategorileri düzelt
     python bot.py migrate      # eski films.json'u yeni şemaya taşı (internetsiz)
     python bot.py status       # katalog özeti
     python bot.py auto         # tara + sunucu + zamanlayıcı
@@ -68,7 +69,8 @@ def interactive():
     print(" 5) Kaynakları Onar       — oynamayan videoları yeniden çöz")
     print(" 6) Katalog Durumu        — özet + CDN/site bilgisi")
     print(" 7) Kataloğu Taşı (migrate) — eski films.json'u yeni şemaya çevir")
-    choice = ask("Seçimin [1-7]: ")
+    print(" 8) Kapak & Kategori Onar — logo afişleri/yanlış kategorileri düzelt")
+    choice = ask("Seçimin [1-8]: ")
 
     if choice == "1":
         limit = ask(f"Kaç yeni film? [boş={config.MAX_FILMS_PER_SCAN}]: ")
@@ -94,6 +96,10 @@ def interactive():
         print_status()
     elif choice == "7":
         scraper.migrate_db()
+    elif choice == "8":
+        limit = ask("Kaç kayıt kontrol edilsin? [boş=hepsi]: ")
+        force = ask("Doğru görünen afişler de yeniden mi denensin? [e/h]: ", "h").lower().startswith(("e", "y"))
+        scraper.fix_metadata(limit=int(limit) if limit.isdigit() else None, force=force)
     else:
         print("Geçersiz seçim.")
 
@@ -108,6 +114,8 @@ def main(argv):
         "5": "repair", "repair": "repair", "onar": "repair", "fix": "repair",
         "6": "status", "status": "status", "durum": "status",
         "7": "migrate", "migrate": "migrate", "tasir": "migrate", "taşı": "migrate",
+        "8": "covers", "covers": "covers", "kapak": "covers", "kapaklar": "covers",
+        "fixmeta": "covers", "metadata": "covers",
     }
     action = aliases.get(command, "")
     if not command:
@@ -115,7 +123,7 @@ def main(argv):
         return
     if not action:
         print(f"Bilinmeyen komut: {command}")
-        print("Kullanım: python bot.py [scan|full|server|auto|repair|migrate|status]")
+        print("Kullanım: python bot.py [scan|full|server|auto|repair|covers|migrate|status]")
         return
     if action == "scan":
         scraper.scan()
@@ -129,6 +137,8 @@ def main(argv):
         server.run()
     elif action == "repair":
         scraper.repair()
+    elif action == "covers":
+        scraper.fix_metadata()
     elif action == "migrate":
         scraper.migrate_db()
     elif action == "status":

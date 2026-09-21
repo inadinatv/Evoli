@@ -26,6 +26,9 @@ VIDEO_SIZE = 200_000
 VIDEO_BODY = (b"EVOLI-MP4-DATA-" + (bytes(range(256)) * 900))[:VIDEO_SIZE]
 POSTER_BODY = b"\x89PNG\r\n\x1a\n" + b"EVOLIPOSTER" * 50
 SEGMENT_BODY = b"\x47" + b"TSSEGMENT" * 200
+LOGO_BODY = b"\x89PNG\r\n\x1a\n" + b"EVOLISITELOGO" * 20
+HLSJS_BODY = (b"/*hls.js*/window.Hls=function(){};"
+              b"window.Hls.isSupported=function(){return false;};")
 
 FILMS = [
     {"id": "300001", "slug": "deneme-filmi-bir-uzun-baslik", "title": "Deneme Filmi Bir",
@@ -64,6 +67,9 @@ class State:
 
 def _page(shell_title: str, body: str, host: str, canonical: str = "") -> str:
     canonical = canonical or f"http://{host}/"
+    # Gerçek sitede olduğu gibi menü + yan sütunda TÜM kategoriler listelenir;
+    # film kaydı bu bloklardan değil, içeriğe ait kategorilerden alınmalıdır.
+    sidebar = "".join(f'<a href="http://{host}{path}">{name}</a>' for name, path in CATEGORIES.items())
     return f"""<!DOCTYPE html><html lang="tr"><head>
 <meta charset="utf-8">
 <link rel="canonical" href="{canonical}">
@@ -77,6 +83,7 @@ def _page(shell_title: str, body: str, host: str, canonical: str = "") -> str:
   <a href="http://{host}/author/pornosu/">Yazar</a>
   <a href="http://{host}/page/2/">2</a>
 </nav>
+<aside class="sidebar widget">{sidebar}</aside>
 {body}
 </body></html>"""
 
@@ -87,8 +94,8 @@ def film_page(film: dict, host: str) -> str:
 <div class="player">
   <iframe src="/pornolar/{film['id']}.html" width="640" height="360" frameborder="0" allowfullscreen></iframe>
 </div>
-<meta property="og:image" content="http://{host}/img/{film['id']}.jpg">
-<div class="cats">{"".join(f'<a href="http://{host}{CATEGORIES[c]}">{c}</a>' for c in film['cats'])}</div>
+<meta property="og:image" content="http://{host}/logo1.png">
+<div class="cats">{"".join(f'<a href="http://{host}{CATEGORIES[c]}" rel="category tag">{c}</a>' for c in film['cats'])}</div>
 <div class="related">{"".join(f'<a href="http://{host}/{f["slug"]}/">{f["title"]}</a>' for f in FILMS[:3])}</div>
 """
     return _page(film["title"], body, host, canonical=f"http://{host}/{film['slug']}/")
@@ -176,6 +183,12 @@ class FakeSiteHandler(BaseHTTPRequestHandler):
         host = self._host()
         referer = self.headers.get("Referer") or ""
         self.state.hit(path, referer)
+
+        # --- site logo + hls.js (üçüncü taraf kaynak taklidi) ----------- #
+        if path == "/logo1.png":
+            return self._send(200, LOGO_BODY, "image/png")
+        if path == "/hls.min.js":
+            return self._send(200, HLSJS_BODY, "application/javascript")
 
         # --- video / poster (hotlink korumalı) ------------------------- #
         match = re.fullmatch(r"/(\d{6})\.mp4", path)

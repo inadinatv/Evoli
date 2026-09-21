@@ -423,7 +423,10 @@ def build_film(session, url: str, res: resolver_mod.MediaResolver, meta: dict,
     title = extract.find_title(html, fallback_title)
 
     cats = list(post.get("categories") or [])
-    cat_links = extract.find_category_links(html, page_url)
+    # scope="content": menü/yan sütundaki TÜM kategoriler değil, filmin kendi
+    # kategorileri.  Eski kod tüm sayfayı taradığı için her filme 52 kategori
+    # yazılıyor ve kategori filtresi anlamsızlaşıyordu.
+    cat_links = extract.find_category_links(html, page_url, scope="content")
     if cat_links:
         meta.setdefault("categories", {}).update(
             {name: url for name, url in cat_links.items() if name not in meta.get("categories", {})})
@@ -889,6 +892,123 @@ def repair(limit: Optional[int] = None, workers: Optional[int] = None,
     if verbose:
         log(f"[✓] Onarım bitti: {stats['fixed']} düzeltildi, {stats['dead']} ölü, "
             f"{stats['ok']}/{stats['total_films']} oynatılabilir")
+    return stats
+
+
+def fix_metadata(limit: Optional[int] = None, posters: bool = True, categories: bool = True,
+                 force: bool = False, workers: Optional[int] = None, verbose: bool = True) -> dict:
+    """Katalogdaki afiş ve kategori bozukluklarını onarır.
+
+    * **Kategoriler**: WordPress REST API toplu çekilir (sayfa sayfa film
+      açmak gerekmez); menüdeki 52 kategorinin tamamı basılmış kayıtlar
+      düzeltilir.
+    * **Afişler**: logo/yer tutucu görseller (``logo1.png`` vb.) reddedilir;
+      sayfa/ögme görseli, oynatıcı ``image:`` alanı ve CDN ``img/{id}.jpg``
+      şablonları doğrulanıp gerçeği kaydedilir.  ``/poster/<id>`` da aynı
+      önbelleği kullanır.
+    """
+    started = time.time()
+    db = load_db()
+    meta = db.setdefault("meta", {})
+    films = db.get("films", [])
+    stats = {"checked": 0, "posters_fixed": 0, "posters_failed": 0, "posters_skipped": 0,
+             "categories_fixed": 0, "total": len(films)}
+    if not films:
+        return stats
+
+    session = net.make_session()
+    res = resolver_mod.MediaResolver(session=session)
+
+    # ---- 1) Kategoriler: REST toplu zenginleştirme ---------------------- #
+    if categories:
+        if verbose:
+            log("[~] Kategoriler REST API'den yeniden alınıyor...")
+        try:
+            posts = discover_rest(session, meta, limit=0, verbose=verbose)
+        except Exception as exc:  # noqa: BLE001 - ağ yoksa kategori adımını atla
+            log(f"  [!] REST erişilemedi, kategoriler korunuyor: {exc}")
+            posts = []
+        by_url = {(p.get("url") or "").rstrip("/"): p for p in posts if p.get("url")}
+        for film in films:
+            post = by_url.get((film.get("url") or "").rstrip("/"))
+            if not post:
+                continue
+            new_cats = [c for c in (post.get("categories") or []) if c]
+            old_cats = film.get("categories") or []
+            # REST gerçekten kategori veriyorsa sayfa çorbası üzerine yazılır.
+            if new_cats and new_cats != old_cats:
+                film["categories"] = new_cats
+                stats["categories_fixed"] += 1
+            if post.get("date") and not film.get("date"):
+                film["date"] = post["date"]
+            if post.get("title") and (not film.get("title") or film.get("title") == post.get("slug", "").replace("-", " ").title()):
+                film["title"] = extract.clean_text(post["title"]) or film.get("title")
+        if verbose and stats["categories_fixed"]:
+            log(f"  [✓] {stats['categories_fixed']} kaydın kategorisi düzeltildi")
+
+    # ---- 2) Afişler: logo temizliği + gerçek afiş doğrulama ------------- #
+    if posters:
+        if verbose:
+            log("[~] Afişler doğrulanıyor/onarılıyor...")
+
+        def needs_poster(film: dict) -> bool:
+            if force:
+                return True
+            poster = film.get("poster") or ""
+            if not poster or extract.is_generic_image(poster):
+                return True
+            item = res.get_item(str(film.get("id") or ""))
+            if item and item.get("poster") and item.get("poster") == poster:
+                return False
+            return not (film.get("poster_ok") or (item or {}).get("poster_ts"))
+
+        pending = [f for f in films if needs_poster(f)]
+        if limit:
+            pending = pending[:limit]
+        stats["posters_skipped"] = len(films) - len(pending)
+        workers = max(1, min(workers or config.SCAN_WORKERS, 16))
+        lock = threading.Lock()
+
+        def work(film):
+            resolved = res.resolve_poster(film)
+            with lock:
+                stats["checked"] += 1
+                if resolved.get("ok"):
+                    old = film.get("poster") or ""
+                    if old and old != resolved["url"] and not extract.is_generic_image(old):
+                        film["poster_alt"] = old
+                    film["poster"] = resolved["url"]
+                    film["poster_ok"] = True
+                    stats["posters_fixed"] += 1
+                else:
+                    # Logo temizliği: gerçek afiş yoksa logo sahtesi de kalmasın
+                    if extract.is_generic_image(film.get("poster") or ""):
+                        film["poster"] = ""
+                    stats["posters_failed"] += 1
+                if verbose and stats["checked"] % 25 == 0:
+                    log(f"    ~ {stats['checked']}/{len(pending)} • düzeltilen afiş {stats['posters_fixed']}")
+
+        if pending:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(work, f) for f in pending]
+                try:
+                    for _ in as_completed(futures):
+                        pass
+                except KeyboardInterrupt:  # pragma: no cover
+                    log("\n  [!] Durduruldu — kaydedilenler yazılıyor")
+                    for future in futures:
+                        future.cancel()
+
+    db["films"] = films
+    save_db(db)
+    write_m3u(db)
+    write_local_m3u(db)
+    res.save(force=True)
+    stats["elapsed"] = round(time.time() - started, 1)
+    if verbose:
+        log(f"[✓] Metadatâ onarımı: afiş {stats['posters_fixed']} düzeltildi, "
+            f"{stats['posters_failed']} bulunamadı, {stats['posters_skipped']} atlandı • "
+            f"kategori {stats['categories_fixed']} • {stats['elapsed']}s")
     return stats
 
 

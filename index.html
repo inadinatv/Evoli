@@ -524,7 +524,7 @@ body.locked> :not(#adult-gate){visibility:hidden!important;pointer-events:none!i
 #adult-gate.hidden{opacity:0;visibility:hidden;pointer-events:none}
 .gate-card{width:min(100%,430px);padding:30px;border:1px solid rgba(255,255,255,.12);border-radius:26px;background:linear-gradient(145deg,rgba(27,28,39,.96),rgba(12,13,20,.96));box-shadow:0 30px 90px rgba(0,0,0,.6),0 0 0 1px rgba(255,27,56,.08);text-align:center}
 .gate-mark{width:62px;height:62px;margin:0 auto 18px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(145deg,#ff1739,#a30828);font-size:27px;font-weight:900;box-shadow:0 12px 28px rgba(255,23,57,.3)}
-.gate-card h1{margin:0;font-size:25px;letter-spacing:-.5px}.gate-card h1 span{color:#ff3b58}.gate-sub{margin:10px 0 22px;color:#a7a9b6;font-size:13px;line-height:1.55}.gate-row{display:flex;gap:10px;margin-bottom:12px}.gate-input{width:100%;height:48px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:#11131d;color:#fff;padding:0 15px;outline:none;font:inherit}.gate-input:focus{border-color:#ff3150;box-shadow:0 0 0 3px rgba(255,49,80,.15)}.gate-submit{width:100%;height:48px;border:0;border-radius:13px;background:linear-gradient(135deg,#ff1e43,#c90d2d);color:#fff;font-weight:800;cursor:pointer;box-shadow:0 10px 22px rgba(255,30,67,.22)}.gate-submit:active{transform:scale(.98)}.gate-age{display:flex;align-items:flex-start;gap:10px;text-align:left;color:#c8c9d2;font-size:12px;line-height:1.4;margin:14px 0}.gate-age input{accent-color:#ff2447;margin-top:2px}.gate-error{min-height:18px;margin:10px 0 0;color:#ff7387;font-size:12px}.gate-note{margin-top:18px;color:#737685;font-size:10px;line-height:1.45}.gate-lock{position:fixed;right:14px;bottom:14px;z-index:100;display:none;width:40px;height:40px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(17,19,29,.88);color:#fff;cursor:pointer}.gate-lock.show{display:block}
+.gate-card h1{margin:0;font-size:25px;letter-spacing:-.5px}.gate-card h1 span{color:#ff3b58}.gate-sub{margin:10px 0 22px;color:#a7a9b6;font-size:13px;line-height:1.55}.gate-row{display:flex;gap:10px;margin-bottom:12px}.gate-input{width:100%;height:48px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:#11131d;color:#fff;padding:0 15px;outline:none;font:inherit}.gate-input:focus{border-color:#ff3150;box-shadow:0 0 0 3px rgba(255,49,80,.15)}.gate-submit{width:100%;height:48px;border:0;border-radius:13px;background:linear-gradient(135deg,#ff1e43,#c90d2d);color:#fff;font-weight:800;cursor:pointer;box-shadow:0 10px 22px rgba(255,30,67,.22)}.gate-submit:active{transform:scale(.98)}.gate-age{display:flex;align-items:flex-start;gap:10px;text-align:left;color:#c8c9d2;font-size:12px;line-height:1.4;margin:14px 0}.gate-age input{accent-color:#ff2447;margin-top:2px}.gate-error{min-height:18px;margin:10px 0 0;color:#ff7387;font-size:12px}.gate-note{margin-top:18px;color:#737685;font-size:10px;line-height:1.45}.gate-lock{position:fixed;right:14px;bottom:14px;z-index:100;display:none;width:40px;height:40px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(17,19,29,.88);color:#fff;cursor:pointer}.gate-lock.show{display:block}.gate-reset{margin-top:12px;border:0;background:transparent;color:#888b9a;font-size:11px;text-decoration:underline;cursor:pointer}.gate-reset:hover{color:#ff6b7e}
 @media(max-width:480px){.gate-card{padding:25px 19px;border-radius:22px}.gate-card h1{font-size:22px}}
 
 </style>
@@ -533,15 +533,17 @@ body.locked> :not(#adult-gate){visibility:hidden!important;pointer-events:none!i
 <div id="adult-gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
   <div class="gate-card">
     <div class="gate-mark">18+</div>
-    <h1 id="gate-title"><span>EVOLI</span> Özel Alan</h1>
-    <p class="gate-sub">Bu içerik yalnızca 18 yaş ve üzeri kullanıcılar içindir. Devam etmek için yaşınızı doğrulayın ve erişim şifresini girin.</p>
+    <h1 id="gate-title"><span>EVOLI</span> Güvenli Alan</h1>
+    <p class="gate-sub" id="gate-sub">Bu cihazdaki ilk kullanımınız. 18+ onayından sonra yalnızca sizin bileceğiniz kişisel erişim şifresini oluşturun.</p>
     <label class="gate-age"><input id="gate-age" type="checkbox"> <span>18 yaşından büyüğüm ve yetişkin içeriklere erişmeyi kabul ediyorum.</span></label>
     <form id="gate-form" autocomplete="off">
-      <div class="gate-row"><input class="gate-input" id="gate-password" type="password" inputmode="text" placeholder="Erişim şifresi" autocomplete="current-password" required></div>
-      <button class="gate-submit" type="submit">🔒 Güvenli Giriş</button>
+      <div class="gate-row"><input class="gate-input" id="gate-password" type="password" inputmode="text" placeholder="Yeni kişisel şifre" autocomplete="new-password" minlength="8" required></div>
+      <div class="gate-row" id="gate-confirm-row"><input class="gate-input" id="gate-confirm" type="password" inputmode="text" placeholder="Şifreyi tekrar yazın" autocomplete="new-password" minlength="8" required></div>
+      <button class="gate-submit" id="gate-submit" type="submit">🔐 Şifremi Oluştur</button>
     </form>
+    <button class="gate-reset" id="gate-reset" type="button">Şifremi unuttum / bu cihazı sıfırla</button>
     <div class="gate-error" id="gate-error" role="status" aria-live="polite"></div>
-    <p class="gate-note">Oturum bu cihazda 12 saat korunur. Paylaşılan cihazlarda çıkış yapmayı unutmayın.</p>
+    <p class="gate-note">Şifre sadece bu cihazın güvenli depolamasında PBKDF2 hash olarak tutulur. Oturum 12 saat açık kalır. Tarayıcı verilerini silerseniz şifre sıfırlanır.</p>
   </div>
 </div>
 <button id="adult-lock" class="gate-lock" title="Ekranı kilitle" aria-label="Ekranı kilitle">🔒</button>
@@ -767,20 +769,30 @@ body.locked> :not(#adult-gate){visibility:hidden!important;pointer-events:none!i
 </div>
 
 <script>
-/* Single-file adult gate. This is a WebView access gate, not server-side authentication. */
+/* Device-local adult gate: each device creates its own PBKDF2 password. */
 (()=>{
-  const GATE_HASH='8c826b6ff09f8a8fda87a746b50c52f0f7210c7e4cff33b2542239ef1773af65';
-  const KEY='evoli_adult_access_v1', ATTEMPTS='evoli_gate_attempts_v1', TTL=12*60*60*1000, LOCKOUT=60*1000;
-  const gate=document.getElementById('adult-gate'), form=document.getElementById('gate-form'), age=document.getElementById('gate-age'), pass=document.getElementById('gate-password'), error=document.getElementById('gate-error'), lock=document.getElementById('adult-lock');
-  const digest=async text=>{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');};
-  const valid=()=>{try{return Number(sessionStorage.getItem(KEY)||0)>Date.now()||Number(localStorage.getItem(KEY)||0)>Date.now();}catch{return false;}};
+  const KEY='evoli_device_password_v2', SESSION='evoli_device_session_v2', AGE='evoli_age_confirmed_v2', ATTEMPTS='evoli_gate_attempts_v2', TTL=12*60*60*1000, LOCKOUT=60*1000, ITERATIONS=120000;
+  const gate=document.getElementById('adult-gate'), form=document.getElementById('gate-form'), age=document.getElementById('gate-age'), pass=document.getElementById('gate-password'), confirm=document.getElementById('gate-confirm'), confirmRow=document.getElementById('gate-confirm-row'), submit=document.getElementById('gate-submit'), reset=document.getElementById('gate-reset'), sub=document.getElementById('gate-sub'), error=document.getElementById('gate-error'), lock=document.getElementById('adult-lock');
+  const enc=new TextEncoder();
+  const bytesToHex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+  const hexToBytes=h=>new Uint8Array((h.match(/.{1,2}/g)||[]).map(x=>parseInt(x,16)));
+  const derive=async(password,salt)=>{const key=await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']);return bytesToHex(await crypto.subtle.deriveBits({name:'PBKDF2',salt:hexToBytes(salt),iterations:ITERATIONS,hash:'SHA-256'},key,256));};
+  const hasPassword=()=>{try{return !!localStorage.getItem(KEY);}catch{return false;}};
+  const validSession=()=>{try{return Number(sessionStorage.getItem(SESSION)||0)>Date.now();}catch{return false;}};
   const blocked=()=>{try{return Number(localStorage.getItem(ATTEMPTS+'_until')||0)>Date.now();}catch{return false;}};
   const fail=()=>{try{const n=Number(localStorage.getItem(ATTEMPTS)||0)+1;localStorage.setItem(ATTEMPTS,String(n));if(n>=5){localStorage.setItem(ATTEMPTS+'_until',String(Date.now()+LOCKOUT));localStorage.removeItem(ATTEMPTS);}}catch{}};
   const unlock=()=>{document.body.classList.remove('locked');gate.classList.add('hidden');lock.classList.add('show');};
-  const save=()=>{try{sessionStorage.setItem(KEY,String(Date.now()+TTL));}catch{};unlock();};
-  if(valid()) unlock(); else setTimeout(()=>pass.focus(),80);
-  form.addEventListener('submit',async e=>{e.preventDefault();error.textContent='';if(blocked()){error.textContent='Çok fazla hatalı deneme. 60 saniye sonra tekrar deneyin.';return;}if(!age.checked){error.textContent='Devam etmek için 18+ onayını işaretleyin.';return;}const value=pass.value.trim();if(!value){error.textContent='Şifre gerekli.';return;}try{if(await digest(value)!==GATE_HASH){fail();error.textContent='Şifre hatalı. Lütfen tekrar deneyin.';pass.select();return;}try{localStorage.removeItem(ATTEMPTS);localStorage.removeItem(ATTEMPTS+'_until');}catch{}save();}catch{error.textContent='Güvenli doğrulama başlatılamadı. HTTPS bağlantısını kontrol edin.';}});
-  lock.addEventListener('click',()=>{try{sessionStorage.removeItem(KEY);localStorage.removeItem(KEY);}catch{};location.reload();});
+  const saveSession=()=>{try{sessionStorage.setItem(SESSION,String(Date.now()+TTL));localStorage.setItem(AGE,'1');}catch{};unlock();};
+  const setMode=setup=>{confirmRow.style.display=setup?'flex':'none';confirm.required=setup;pass.placeholder=setup?'Yeni kişisel şifre':'Cihaz şifreniz';submit.textContent=setup?'🔐 Şifremi Oluştur':'🔒 Güvenli Giriş';sub.textContent=setup?'Bu cihazdaki ilk kullanımınız. 18+ onayından sonra yalnızca sizin bileceğiniz kişisel erişim şifresini oluşturun.':'Bu cihazda kayıtlı kişisel şifrenizi girerek yetişkin alana devam edin.';reset.style.display=setup?'none':'inline-block';};
+  const setup=!hasPassword(); setMode(setup);
+  if(validSession()) unlock(); else setTimeout(()=>pass.focus(),80);
+  form.addEventListener('submit',async e=>{e.preventDefault();error.textContent='';if(blocked()){error.textContent='Çok fazla hatalı deneme. 60 saniye sonra tekrar deneyin.';return;}if(!age.checked){error.textContent='Devam etmek için 18+ onayını işaretleyin.';return;}const value=pass.value.trim();if(value.length<8){error.textContent='Şifre en az 8 karakter olmalı.';return;}try{if(!hasPassword()){
+      if(value!==confirm.value.trim()){error.textContent='Şifre tekrarı eşleşmiyor.';return;}
+      const salt=new Uint8Array(16);crypto.getRandomValues(salt);const saltHex=bytesToHex(salt), hash=await derive(value,saltHex);localStorage.setItem(KEY,JSON.stringify({salt:saltHex,hash,iterations:ITERATIONS}));saveSession();
+    }else{const record=JSON.parse(localStorage.getItem(KEY));const hash=await derive(value,record.salt);if(hash!==record.hash){fail();error.textContent='Cihaz şifresi hatalı. Lütfen tekrar deneyin.';pass.select();return;}try{localStorage.removeItem(ATTEMPTS);localStorage.removeItem(ATTEMPTS+'_until');}catch{}saveSession();}
+  }catch{error.textContent='Güvenli depolama kullanılamıyor. HTTPS bağlantısını kontrol edin.';}});
+  reset.addEventListener('click',()=>{if(confirm('Bu cihazdaki kayıtlı şifre silinsin ve yeni şifre oluşturulsun mu?')){try{localStorage.removeItem(KEY);sessionStorage.removeItem(SESSION);}catch{}setMode(true);pass.value='';confirm.value='';age.checked=false;error.textContent='Yeni kişisel şifrenizi oluşturun.';pass.focus();}});
+  lock.addEventListener('click',()=>{try{sessionStorage.removeItem(SESSION);}catch{};location.reload();});
 })();
 </script>
 <script>

@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow,noarchive">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#06060a">
 <meta name="color-scheme" content="dark">
@@ -516,9 +517,34 @@ img{max-width:100%}
 @media(max-width:700px){.zoom-tools{gap:2px}.zoom-tools .ctrl-icon{width:34px;height:34px}.ctrl-top{padding:10px 12px}.ctrl-bottom{padding:8px 12px 12px}.ctrl-actions{gap:4px}.ctrl-actions .ctrl-icon{width:34px;height:34px}}
 @media(max-width:1024px) and (orientation:landscape){.player-container{flex-direction:row!important;height:100dvh}.player-main{width:100%;height:100%}.player-sidebar{display:none!important}.video-stage{min-height:0;height:100%}.ctrl-center{padding:4px}.ctrl-play{width:58px;height:58px}.ctrl-top{padding:8px 12px}.ctrl-bottom{padding:6px 12px 8px}}
 
+
+/* ADULT ACCESS GATE — AppCreator24/WebView single-file protection */
+body.locked> :not(#adult-gate){visibility:hidden!important;pointer-events:none!important}
+#adult-gate{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:22px;background:radial-gradient(circle at 20% 10%,rgba(255,27,56,.22),transparent 34%),radial-gradient(circle at 85% 90%,rgba(95,53,255,.18),transparent 38%),#07080d;transition:opacity .28s ease,visibility .28s ease}
+#adult-gate.hidden{opacity:0;visibility:hidden;pointer-events:none}
+.gate-card{width:min(100%,430px);padding:30px;border:1px solid rgba(255,255,255,.12);border-radius:26px;background:linear-gradient(145deg,rgba(27,28,39,.96),rgba(12,13,20,.96));box-shadow:0 30px 90px rgba(0,0,0,.6),0 0 0 1px rgba(255,27,56,.08);text-align:center}
+.gate-mark{width:62px;height:62px;margin:0 auto 18px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(145deg,#ff1739,#a30828);font-size:27px;font-weight:900;box-shadow:0 12px 28px rgba(255,23,57,.3)}
+.gate-card h1{margin:0;font-size:25px;letter-spacing:-.5px}.gate-card h1 span{color:#ff3b58}.gate-sub{margin:10px 0 22px;color:#a7a9b6;font-size:13px;line-height:1.55}.gate-row{display:flex;gap:10px;margin-bottom:12px}.gate-input{width:100%;height:48px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:#11131d;color:#fff;padding:0 15px;outline:none;font:inherit}.gate-input:focus{border-color:#ff3150;box-shadow:0 0 0 3px rgba(255,49,80,.15)}.gate-submit{width:100%;height:48px;border:0;border-radius:13px;background:linear-gradient(135deg,#ff1e43,#c90d2d);color:#fff;font-weight:800;cursor:pointer;box-shadow:0 10px 22px rgba(255,30,67,.22)}.gate-submit:active{transform:scale(.98)}.gate-age{display:flex;align-items:flex-start;gap:10px;text-align:left;color:#c8c9d2;font-size:12px;line-height:1.4;margin:14px 0}.gate-age input{accent-color:#ff2447;margin-top:2px}.gate-error{min-height:18px;margin:10px 0 0;color:#ff7387;font-size:12px}.gate-note{margin-top:18px;color:#737685;font-size:10px;line-height:1.45}.gate-lock{position:fixed;right:14px;bottom:14px;z-index:100;display:none;width:40px;height:40px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(17,19,29,.88);color:#fff;cursor:pointer}.gate-lock.show{display:block}
+@media(max-width:480px){.gate-card{padding:25px 19px;border-radius:22px}.gate-card h1{font-size:22px}}
+
 </style>
 </head>
-<body>
+<body class="locked">
+<div id="adult-gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+  <div class="gate-card">
+    <div class="gate-mark">18+</div>
+    <h1 id="gate-title"><span>EVOLI</span> Özel Alan</h1>
+    <p class="gate-sub">Bu içerik yalnızca 18 yaş ve üzeri kullanıcılar içindir. Devam etmek için yaşınızı doğrulayın ve erişim şifresini girin.</p>
+    <label class="gate-age"><input id="gate-age" type="checkbox"> <span>18 yaşından büyüğüm ve yetişkin içeriklere erişmeyi kabul ediyorum.</span></label>
+    <form id="gate-form" autocomplete="off">
+      <div class="gate-row"><input class="gate-input" id="gate-password" type="password" inputmode="text" placeholder="Erişim şifresi" autocomplete="current-password" required></div>
+      <button class="gate-submit" type="submit">🔒 Güvenli Giriş</button>
+    </form>
+    <div class="gate-error" id="gate-error" role="status" aria-live="polite"></div>
+    <p class="gate-note">Oturum bu cihazda 12 saat korunur. Paylaşılan cihazlarda çıkış yapmayı unutmayın.</p>
+  </div>
+</div>
+<button id="adult-lock" class="gate-lock" title="Ekranı kilitle" aria-label="Ekranı kilitle">🔒</button>
 
 <header class="header">
   <div class="header-inner">
@@ -740,6 +766,23 @@ img{max-width:100%}
   <div style="margin-top:10px;font-size:11px;color:var(--txt3)">Çift tık: tam ekran • Video üstüne tık: oynat/duraklat</div>
 </div>
 
+<script>
+/* Single-file adult gate. This is a WebView access gate, not server-side authentication. */
+(()=>{
+  const GATE_HASH='8c826b6ff09f8a8fda87a746b50c52f0f7210c7e4cff33b2542239ef1773af65';
+  const KEY='evoli_adult_access_v1', ATTEMPTS='evoli_gate_attempts_v1', TTL=12*60*60*1000, LOCKOUT=60*1000;
+  const gate=document.getElementById('adult-gate'), form=document.getElementById('gate-form'), age=document.getElementById('gate-age'), pass=document.getElementById('gate-password'), error=document.getElementById('gate-error'), lock=document.getElementById('adult-lock');
+  const digest=async text=>{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');};
+  const valid=()=>{try{return Number(sessionStorage.getItem(KEY)||0)>Date.now()||Number(localStorage.getItem(KEY)||0)>Date.now();}catch{return false;}};
+  const blocked=()=>{try{return Number(localStorage.getItem(ATTEMPTS+'_until')||0)>Date.now();}catch{return false;}};
+  const fail=()=>{try{const n=Number(localStorage.getItem(ATTEMPTS)||0)+1;localStorage.setItem(ATTEMPTS,String(n));if(n>=5){localStorage.setItem(ATTEMPTS+'_until',String(Date.now()+LOCKOUT));localStorage.removeItem(ATTEMPTS);}}catch{}};
+  const unlock=()=>{document.body.classList.remove('locked');gate.classList.add('hidden');lock.classList.add('show');};
+  const save=()=>{try{sessionStorage.setItem(KEY,String(Date.now()+TTL));}catch{};unlock();};
+  if(valid()) unlock(); else setTimeout(()=>pass.focus(),80);
+  form.addEventListener('submit',async e=>{e.preventDefault();error.textContent='';if(blocked()){error.textContent='Çok fazla hatalı deneme. 60 saniye sonra tekrar deneyin.';return;}if(!age.checked){error.textContent='Devam etmek için 18+ onayını işaretleyin.';return;}const value=pass.value.trim();if(!value){error.textContent='Şifre gerekli.';return;}try{if(await digest(value)!==GATE_HASH){fail();error.textContent='Şifre hatalı. Lütfen tekrar deneyin.';pass.select();return;}try{localStorage.removeItem(ATTEMPTS);localStorage.removeItem(ATTEMPTS+'_until');}catch{}save();}catch{error.textContent='Güvenli doğrulama başlatılamadı. HTTPS bağlantısını kontrol edin.';}});
+  lock.addEventListener('click',()=>{try{sessionStorage.removeItem(KEY);localStorage.removeItem(KEY);}catch{};location.reload();});
+})();
+</script>
 <script>
 // Evoli sunucusu varsa aynı-origin uçlarını kullanır. Statik/Worker dağıtımında
 // verilen Cloudflare Worker, `/?url=...&ref=...` biçimindeki byte-range proxy'dir.

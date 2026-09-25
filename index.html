@@ -269,7 +269,7 @@ img{max-width:100%}
 }
 @media(max-width:1024px){.player-container{flex-direction:column}}
 .player-main{flex:1;min-width:0;display:flex;flex-direction:column;background:#000;position:relative;overflow:hidden}
-.video-stage{position:relative;width:100%;flex:1;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}
+.video-stage{position:relative;width:100%;flex:1;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;touch-action:none}
 .video-stage video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
 .video-stage.theater video{object-fit:contain}
 
@@ -1441,9 +1441,24 @@ video.addEventListener('volumechange', ()=>{
   muteBtn.textContent = video.muted||video.volume===0?'🔇':'🔊';
 });
 stage.addEventListener('click',e=>{if(e.target.closest('.custom-controls')||touchGesture){touchGesture=false;return;}togglePlay();});
-stage.addEventListener('touchstart',e=>{if(e.target.closest('.custom-controls'))return;if(e.touches.length===2){e.preventDefault();touchGesture=true;stage.classList.add('zooming');pinchStartDistance=touchDistance(e.touches[0],e.touches[1]);pinchStartScale=zoomScale;}else if(e.touches.length===1&&zoomScale>1){e.preventDefault();touchGesture=true;stage.classList.add('zooming');panStartX=e.touches[0].clientX;panStartY=e.touches[0].clientY;panOriginX=zoomX;panOriginY=zoomY;}},{passive:false});
-stage.addEventListener('touchmove',e=>{if(e.target.closest('.custom-controls'))return;if(e.touches.length===2&&pinchStartDistance){e.preventDefault();zoomScale=clampZoom(pinchStartScale*touchDistance(e.touches[0],e.touches[1])/pinchStartDistance);applyZoom();}else if(e.touches.length===1&&zoomScale>1&&touchGesture){e.preventDefault();zoomX=panOriginX+e.touches[0].clientX-panStartX;zoomY=panOriginY+e.touches[0].clientY-panStartY;applyZoom();}},{passive:false});
-stage.addEventListener('touchend',e=>{if(!e.touches.length){pinchStartDistance=0;stage.classList.remove('zooming');setTimeout(()=>touchGesture=false,80);}},{passive:true});
+const activePointers=new Map();
+function pointerPair(){return [...activePointers.values()].slice(0,2);}
+stage.addEventListener('pointerdown',e=>{
+  if(e.pointerType!=='touch'||e.target.closest('.custom-controls'))return;
+  e.preventDefault(); activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  try{stage.setPointerCapture(e.pointerId);}catch{}
+  const pair=pointerPair();
+  if(pair.length===2){touchGesture=true;stage.classList.add('zooming');pinchStartDistance=touchDistance(pair[0],pair[1]);pinchStartScale=zoomScale;}
+  else if(pair.length===1&&zoomScale>1){touchGesture=true;stage.classList.add('zooming');panStartX=e.clientX;panStartY=e.clientY;panOriginX=zoomX;panOriginY=zoomY;}
+},{passive:false});
+stage.addEventListener('pointermove',e=>{
+  if(!activePointers.has(e.pointerId))return;
+  e.preventDefault();activePointers.set(e.pointerId,{x:e.clientX,y:e.clientY});const pair=pointerPair();
+  if(pair.length===2&&pinchStartDistance){zoomScale=clampZoom(pinchStartScale*touchDistance(pair[0],pair[1])/pinchStartDistance);applyZoom();}
+  else if(pair.length===1&&zoomScale>1&&touchGesture){zoomX=panOriginX+e.clientX-panStartX;zoomY=panOriginY+e.clientY-panStartY;applyZoom();}
+},{passive:false});
+function endPointer(e){activePointers.delete(e.pointerId);const pair=pointerPair();if(pair.length===1&&zoomScale>1){panStartX=pair[0].x;panStartY=pair[0].y;panOriginX=zoomX;panOriginY=zoomY;}if(!activePointers.size){pinchStartDistance=0;stage.classList.remove('zooming');setTimeout(()=>touchGesture=false,80);}}
+stage.addEventListener('pointerup',endPointer);stage.addEventListener('pointercancel',endPointer);
 stage.addEventListener('dblclick', ()=>{
   toggleFullscreen();
 });

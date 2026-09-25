@@ -452,6 +452,61 @@ img{max-width:100%}
 
 /* misc */
 .hidden{display:none!important}
+
+/* EVOLI RESPONSIVE TV SYSTEM */
+:root{--rail:286px;--tv-card:210px;--ease-out:cubic-bezier(.23,1,.32,1)}
+.card,.cw-card,.related-card,.menu-item,.h-btn,.ctrl-icon,.icon-btn,.menu-tab,.sort-select{transition:transform .18s var(--ease-out),background .18s var(--ease-out),border-color .18s var(--ease-out),box-shadow .18s var(--ease-out)}
+.card:focus-visible,.cw-card:focus-visible,.related-card:focus-visible{outline:3px solid var(--acc);outline-offset:4px;box-shadow:0 0 0 8px rgba(255,21,50,.18),0 14px 34px rgba(0,0,0,.5)}
+.card{isolation:isolate}
+.card::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;background:linear-gradient(135deg,rgba(255,21,50,.25),transparent 45%);transition:opacity .2s}
+.card:focus-visible::after,.card:hover::after{opacity:1}
+/* Large-screen rail: categories stay visible without covering the catalog. */
+@media (min-width:1200px){
+  body{padding-left:var(--rail)}
+  .header{margin-left:calc(var(--rail) * -1);padding-left:var(--rail)}
+  .header-inner{max-width:none;padding-right:28px}
+  #menu-btn{display:none}
+  .menu-overlay{display:none!important}
+  .menu{position:fixed;left:0;top:0;bottom:0;width:var(--rail);max-width:none;transform:none;z-index:40;padding-top:72px;border-right:1px solid rgba(255,255,255,.08);box-shadow:18px 0 50px rgba(0,0,0,.28)}
+  .menu-head{padding:18px 18px 14px;background:linear-gradient(135deg,rgba(255,21,50,.14),transparent)}
+  .menu-head .icon-btn{display:none}
+  .menu-search{padding:12px 14px}
+  .menu-list{padding:8px 12px 18px}
+  .menu-item{padding:10px 12px}
+  .hero{margin-left:24px;margin-right:24px;min-height:330px}
+  .hero-content{min-height:330px;padding-left:42px}
+  .section{padding-left:24px;padding-right:24px}
+  .count-bar{margin-left:24px;margin-right:24px}
+  .grid{padding-left:24px;padding-right:24px;grid-template-columns:repeat(auto-fill,minmax(174px,1fr));gap:16px}
+}
+/* TV / Android TV: fewer, larger hit targets and clear remote focus. */
+@media (min-width:1600px){
+  :root{--rail:310px}
+  .logo-mark{width:42px;height:42px;font-size:18px}.logo-type{font-size:23px}
+  .h-btn{height:46px;padding:0 18px;font-size:14px}
+  .search-wrap{max-width:720px}.grid{grid-template-columns:repeat(auto-fill,minmax(var(--tv-card),1fr));gap:20px}
+  .card{border-radius:18px}.card-title{font-size:14px}.card-meta .m{font-size:11px;padding:4px 8px}
+  .card-play .icon{width:64px;height:64px;font-size:24px}
+  .menu-item{font-size:14px;min-height:48px}.menu-item .ico{width:32px;height:32px}
+  .section-title{font-size:20px}.count-bar{font-size:14px}
+}
+/* Portrait phones: compact two-column shelf with generous touch targets. */
+@media (max-width:700px){
+  .header{position:sticky}.logo-type{font-size:17px}.logo-sub{font-size:8px;letter-spacing:1.2px}
+  .search-wrap{order:5;flex-basis:100%;max-width:none}.header-inner{flex-wrap:wrap}
+  .header-actions{gap:5px}.header-actions .h-btn{height:36px;min-width:36px}
+  .hero{min-height:245px}.hero-title{font-size:24px}.hero-desc{font-size:12px}
+  .grid{padding:12px 12px 28px;gap:12px}.card{border-radius:12px}.card-title{font-size:12px}
+  .menu{width:min(360px,92vw)}
+  .menu-item{min-height:44px}.menu-foot{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+}
+@media (max-width:420px){
+  .header-inner{padding:9px 10px}.logo{gap:7px}.logo-mark{width:32px;height:32px;font-size:14px}
+  .header-actions .h-btn{padding:0 9px}.hero{margin:8px 8px 0}.hero-content{padding:18px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:8px}
+  .card-top{top:6px;left:6px;right:6px}.card-bottom{padding:8px}.badge{font-size:9px;padding:3px 6px}.badge.fav{width:26px;height:26px}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
 </style>
 </head>
 <body>
@@ -462,7 +517,7 @@ img{max-width:100%}
       <div class="logo-mark">E</div>
       <div>
         <div class="logo-type">EVOLI<span>X</span></div>
-        <div class="logo-sub">Premium • 656 Films</div>
+        <div class="logo-sub">Premium • 1.791 Films</div>
       </div>
     </div>
 
@@ -683,7 +738,7 @@ img{max-width:100%}
 const WORKER_PROXY = "https://evolixx.burhantasci72.workers.dev";
 const LOCAL_HOST = /^(localhost|127\.0\.1|0\.0\.0\.0)$/i.test(location.hostname);
 const HAS_LOCAL_API = /^https?:$/.test(location.protocol) && (LOCAL_HOST || Boolean(window.EVOLI_LOCAL_API));
-const IS_VERCEL = /^https?:$/.test(location.protocol) && /(?:^|\.)vercel\.app$/i.test(location.hostname);
+const IS_VERCEL = /^https?:$/.test(location.protocol) && !location.hostname.endsWith("github.io") && !LOCAL_HOST && !location.hostname.endsWith("workers.dev");
 const MEDIA_PROXY = HAS_LOCAL_API || IS_VERCEL ? location.origin : WORKER_PROXY;
 const PROXY_MODE = HAS_LOCAL_API ? "server" : IS_VERCEL ? "vercel" : "worker";
 function workerUrl(source, ref=""){
@@ -924,7 +979,7 @@ function showMore(){
     const prog = historyMap[f.id]?.progress||0;
     const fav = favorites.has(f.id);
     const topCats = (f.categories||[]).slice(0,2);
-    html+=`<div class="card" data-id="${f.id}" onclick="openPlayer('${f.id}')">
+    html+=`<div class="card" data-id="${f.id}" tabindex="0" role="button" aria-label="${esc(f.title)} oynat" onclick="openPlayer('${f.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPlayer('${f.id}')}" >
       <div class="card-poster">
         <img loading="lazy" src="${mediaUrl(f, 'poster')}" onerror="imgFail(this,'${esc(f.poster||'')}','${esc(f.poster_alt||'')}')" alt="${esc(f.title)}">
         <div class="card-gradient"></div>
@@ -1098,7 +1153,7 @@ function renderRelated(film){
     related = related.concat(extra);
   }
   grid.innerHTML = related.map(f=>`
-    <div class="related-card" onclick="openPlayer('${f.id}')">
+    <div class="related-card" tabindex="0" role="button" onclick="openPlayer('${f.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPlayer('${f.id}')}" >
       <img loading="lazy" src="${mediaUrl(f, 'poster')}" onerror="imgFail(this,'${esc(f.poster||'')}','${esc(f.poster_alt||'')}')" alt="">
       <div class="t">${esc(f.title)}</div>
     </div>

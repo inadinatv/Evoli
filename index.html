@@ -683,17 +683,18 @@ img{max-width:100%}
 const WORKER_PROXY = "https://evolixx.burhantasci72.workers.dev";
 const LOCAL_HOST = /^(localhost|127\.0\.1|0\.0\.0\.0)$/i.test(location.hostname);
 const HAS_LOCAL_API = /^https?:$/.test(location.protocol) && (LOCAL_HOST || Boolean(window.EVOLI_LOCAL_API));
-const MEDIA_PROXY = HAS_LOCAL_API ? location.origin : WORKER_PROXY;
-const PROXY_MODE = HAS_LOCAL_API ? "server" : "worker";
+const IS_VERCEL = /^https?:$/.test(location.protocol) && /(?:^|\.)vercel\.app$/i.test(location.hostname);
+const MEDIA_PROXY = HAS_LOCAL_API || IS_VERCEL ? location.origin : WORKER_PROXY;
+const PROXY_MODE = HAS_LOCAL_API ? "server" : IS_VERCEL ? "vercel" : "worker";
 function workerUrl(source, ref=""){
   if(!source || !/^https?:/i.test(source)) return source;
   const qs = `?url=${encodeURIComponent(source)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`;
-  return `${WORKER_PROXY}/${qs}`;
+  return IS_VERCEL ? `${location.origin}/api/media${qs}` : `${WORKER_PROXY}/${qs}`;
 }
 function proxiedMediaUrl(film, kind){
   const source = kind === "stream" ? film.stream : film.poster;
   if(!source) return "";
-  if(PROXY_MODE === "worker") return workerUrl(source, film.ref || film.embed || film.url || "");
+  if(PROXY_MODE === "worker" || PROXY_MODE === "vercel") return workerUrl(source, film.ref || film.embed || film.url || "");
   return film.id ? `${MEDIA_PROXY}/${kind}/${encodeURIComponent(film.id)}` : source;
 }
 const VIDEOS_PER_PAGE = 48;
@@ -958,9 +959,9 @@ function imgFail(el,direct,alt){
   const chain = [];
   if(direct) chain.push(direct);
   if(alt && alt!==direct) chain.push(alt);
-  if(PROXY_MODE === "worker" && direct) chain.push(workerUrl(direct));
+  if((PROXY_MODE === "worker" || PROXY_MODE === "vercel") && direct) chain.push(workerUrl(direct));
   else if(MEDIA_PROXY && direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(direct)}`);
-  if(PROXY_MODE === "worker" && alt && alt!==direct) chain.push(workerUrl(alt));
+  if((PROXY_MODE === "worker" || PROXY_MODE === "vercel") && alt && alt!==direct) chain.push(workerUrl(alt));
   else if(MEDIA_PROXY && alt && alt!==direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(alt)}`);
   const step = parseInt(el.dataset.fb||"0",10);
   const tried = el.dataset.tried ? el.dataset.tried.split('\u0001') : [];
@@ -1135,7 +1136,7 @@ function streamSrc(film, attempt){
   const candidates = [...new Set([...(film.stream_sources || []), film.stream].filter(Boolean))];
   const source = candidates[Math.min(attempt || 0, Math.max(0, candidates.length - 1))] || film.stream;
   const ref = film.ref || film.embed || film.url || '';
-  if(PROXY_MODE === "worker" && source) return workerUrl(source, ref);
+  if((PROXY_MODE === "worker" || PROXY_MODE === "vercel") && source) return workerUrl(source, ref);
   if(attempt >= PROXY_ATTEMPT && source) return `${MEDIA_PROXY}/proxy?url=${encodeURIComponent(source)}&ref=${encodeURIComponent(ref)}`;
   const base = mediaUrl(film, 'stream');
   return attempt ? `${base}?retry=${attempt}&t=${Date.now()}` : base;

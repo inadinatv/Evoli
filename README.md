@@ -234,3 +234,9 @@ Worker’ın mevcut arayüzü HLS playlist içindeki segment URL’lerini yenide
 `worker.js`, Range başlıksız/sonlu video isteklerini, `206 Partial Content`, CORS, kapak Content-Type’larını ve M3U8 playlist segmentlerini destekleyen güncel Worker sürümüdür. Cloudflare Worker panelinde mevcut script yerine bu dosyanın içeriği deploy edilmelidir. Deploy sonrasında `index.html` içindeki `WORKER_PROXY` adresi aynı kalabilir.
 
 Önemli: Range yanıtlarını `cacheEverything` ile cache’lemeyin. Kısmi video yanıtları `no-store` olmalıdır; aksi halde bir kullanıcının ilk byte aralığı başka kullanıcılara yanlış yanıt olarak dönebilir.
+
+## Vercel alternatifi: Worker’sız medya akışı
+
+GitHub Pages statik olduğu için CDN’e özel Referer ve Range başlıkları ekleyemez. `api/media.js`, aynı depoyu Vercel’e deploy ettiğinizde `/api/media?url=...&ref=...` olarak çalışan Serverless proxy’dir. Player, Vercel domaininde otomatik olarak bu endpoint’i kullanır; GitHub Pages’te ise mevcut Worker yedeği kullanılmaya devam eder.
+
+Vercel’de bu repository’yi import edin; framework olarak Vite/Other, build command boş veya `echo done`, output directory `.` seçilebilir. Deploy edilen Vercel URL’sinde player kaynakları otomatik `/api/media` üzerinden akar.

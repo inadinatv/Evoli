@@ -228,3 +228,9 @@ kapaklar tek seferde düzeltilir.
 `index.html`, statik dağıtımda `https://evolixx.burhantasci72.workers.dev/?url=...&ref=...` Worker formatını kullanır. Böylece kapak görselleri ve yetkili, herkese açık MP4/WebM/benzeri byte-range medya kaynakları tarayıcıdan yüklenebilir. JSON katalog için şu alanlar desteklenir: `films`, `videos`, `items` veya doğrudan dizi; video alanları `stream`, `file`, `src`, `video_url`, `sources`; kapak alanları `poster`, `image`, `thumbnail`, `cover`.
 
 Worker’ın mevcut arayüzü HLS playlist içindeki segment URL’lerini yeniden yazmadığı için statik Worker modunda HLS garanti edilmez. HLS/M3U8 için `server.py` ile aynı-origin `/hls/<id>/...` uçları kullanılmalıdır. DRM, ücretli erişim, geo/hotlink veya sahiplik kontrolleri aşılmaz; yalnızca kullanma yetkisi olan herkese açık kaynaklar proxy’lenmelidir.
+
+## Cloudflare Worker
+
+`worker.js`, Range başlıksız/sonlu video isteklerini, `206 Partial Content`, CORS, kapak Content-Type’larını ve M3U8 playlist segmentlerini destekleyen güncel Worker sürümüdür. Cloudflare Worker panelinde mevcut script yerine bu dosyanın içeriği deploy edilmelidir. Deploy sonrasında `index.html` içindeki `WORKER_PROXY` adresi aynı kalabilir.
+
+Önemli: Range yanıtlarını `cacheEverything` ile cache’lemeyin. Kısmi video yanıtları `no-store` olmalıdır; aksi halde bir kullanıcının ilk byte aralığı başka kullanıcılara yanlış yanıt olarak dönebilir.

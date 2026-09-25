@@ -90,6 +90,12 @@ export default {
       }
       let contentType = upstream.headers.get("Content-Type") || contentTypeFor(upstream.url || target);
       responseHeaders.set("Content-Type", contentType);
+      // Some CDNs omit this header even when they return valid 206 responses.
+      // Without it, browsers cannot request the tail of an MP4 where the moov
+      // metadata may live, so the video remains stuck at readyState 0.
+      if (/^(video\/|audio\/)|mp4|webm|mpegurl/i.test(contentType)) {
+        responseHeaders.set("Accept-Ranges", "bytes");
+      }
       responseHeaders.set("Cache-Control", request.headers.has("Range") ? "no-store" : "public, max-age=300");
 
       const isPlaylist = /mpegurl|vnd\.apple\.mpegurl/i.test(contentType) || /\.m3u8?(?:$|\?)/i.test(upstream.url || target);

@@ -507,6 +507,15 @@ img{max-width:100%}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 
+
+/* MOBILE PLAYER ZOOM + LANDSCAPE FULLSCREEN */
+.video-stage video{transform:translate3d(0,0,0) scale(1);transform-origin:center center;transition:transform .16s var(--ease-out);touch-action:none;will-change:transform}
+.video-stage.zooming video{transition:none}
+.zoom-tools{display:flex;align-items:center;gap:5px;margin-left:4px}.zoom-tools .ctrl-icon{font-size:15px;font-weight:800}.zoom-level{min-width:42px!important;width:auto!important;padding:0 8px!important;font-size:11px!important}
+#player-container:fullscreen{width:100vw;height:100dvh;max-width:none;background:#000}#player-container:fullscreen .player-sidebar,#player-container.mobile-fullscreen .player-sidebar{display:none}#player-container:fullscreen .player-main,#player-container.mobile-fullscreen .player-main{width:100%;height:100%}#player-container:fullscreen .video-stage{height:100%;min-height:0}
+@media(max-width:700px){.zoom-tools{gap:2px}.zoom-tools .ctrl-icon{width:34px;height:34px}.ctrl-top{padding:10px 12px}.ctrl-bottom{padding:8px 12px 12px}.ctrl-actions{gap:4px}.ctrl-actions .ctrl-icon{width:34px;height:34px}}
+@media(max-width:1024px) and (orientation:landscape){.player-container{flex-direction:row!important;height:100dvh}.player-main{width:100%;height:100%}.player-sidebar{display:none!important}.video-stage{min-height:0;height:100%}.ctrl-center{padding:4px}.ctrl-play{width:58px;height:58px}.ctrl-top{padding:8px 12px}.ctrl-bottom{padding:6px 12px 8px}}
+
 </style>
 </head>
 <body>
@@ -642,6 +651,7 @@ img{max-width:100%}
               <button class="ctrl-icon" id="ctrl-fav" title="Favori (F)">♥</button>
               <button class="ctrl-icon" id="ctrl-share" title="Paylaş">⤴</button>
               <button class="ctrl-icon" id="ctrl-pip" title="Mini Oynatıcı (P)">⧉</button>
+              <div class="zoom-tools" aria-label="Yakınlaştırma"><button class="ctrl-icon" id="ctrl-zoom-out" title="Uzaklaştır">−</button><button class="ctrl-icon zoom-level" id="ctrl-zoom-reset" title="Zoom sıfırla">1×</button><button class="ctrl-icon" id="ctrl-zoom-in" title="Yakınlaştır">+</button></div>
               <button class="ctrl-icon" id="ctrl-theater" title="Sinema Modu (T)">◫</button>
               <button class="ctrl-icon" id="ctrl-close" title="Kapat (Esc)">✕</button>
             </div>
@@ -1069,7 +1079,12 @@ const controls = document.getElementById('custom-controls');
 const pContainer = document.getElementById('player-container');
 
 let controlsVisible = true;
-
+let zoomScale=1, zoomX=0, zoomY=0, pinchStartDistance=0, pinchStartScale=1, panStartX=0, panStartY=0, panOriginX=0, panOriginY=0, touchGesture=false;
+function clampZoom(v){return Math.min(3.5,Math.max(1,v));}
+function clampPan(){const mx=Math.max(0,(stage.clientWidth*zoomScale-stage.clientWidth)/2),my=Math.max(0,(stage.clientHeight*zoomScale-stage.clientHeight)/2);zoomX=Math.max(-mx,Math.min(mx,zoomX));zoomY=Math.max(-my,Math.min(my,zoomY));}
+function applyZoom(){zoomScale=clampZoom(zoomScale);if(zoomScale===1){zoomX=0;zoomY=0}else clampPan();video.style.transform=`translate3d(${zoomX}px,${zoomY}px,0) scale(${zoomScale})`;const z=document.getElementById('ctrl-zoom-reset');if(z)z.textContent=`${zoomScale.toFixed(1).replace('.0','')}×`;}
+function resetZoom(){zoomScale=1;zoomX=0;zoomY=0;applyZoom();}
+function touchDistance(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);}
 function openPlayer(id){
   curFilm = ALL_FILMS.find(f=>f.id===id);
   if(!curFilm) return;
@@ -1090,6 +1105,7 @@ function openPlayer(id){
   nextFilmId = idx>=0 && idx<FILMS.length-1 ? FILMS[idx+1].id : (FILMS[0]?.id||null);
 
   modal.classList.remove('hidden');
+  resetZoom();
   document.body.style.overflow='hidden';
   history.replaceState(null,'','#'+curFilm.id);
   loader.classList.remove('hidden');
@@ -1131,7 +1147,8 @@ function closePlayer(){
   modal.classList.add('hidden');
   document.body.style.overflow='';
   history.replaceState(null,'',location.pathname);
-  pContainer.classList.remove('theater');
+  pContainer.classList.remove('theater','mobile-fullscreen');
+  resetZoom();
   theater=false;
   document.getElementById('ctrl-theater').classList.remove('active');
   if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
@@ -1423,10 +1440,10 @@ video.addEventListener('volumechange', ()=>{
   const muteBtn = document.getElementById('ctrl-mute');
   muteBtn.textContent = video.muted||video.volume===0?'🔇':'🔊';
 });
-stage.addEventListener('click', (e)=>{
-  if(e.target.closest('.custom-controls')) return;
-  togglePlay();
-});
+stage.addEventListener('click',e=>{if(e.target.closest('.custom-controls')||touchGesture){touchGesture=false;return;}togglePlay();});
+stage.addEventListener('touchstart',e=>{if(e.target.closest('.custom-controls'))return;if(e.touches.length===2){e.preventDefault();touchGesture=true;stage.classList.add('zooming');pinchStartDistance=touchDistance(e.touches[0],e.touches[1]);pinchStartScale=zoomScale;}else if(e.touches.length===1&&zoomScale>1){e.preventDefault();touchGesture=true;stage.classList.add('zooming');panStartX=e.touches[0].clientX;panStartY=e.touches[0].clientY;panOriginX=zoomX;panOriginY=zoomY;}},{passive:false});
+stage.addEventListener('touchmove',e=>{if(e.target.closest('.custom-controls'))return;if(e.touches.length===2&&pinchStartDistance){e.preventDefault();zoomScale=clampZoom(pinchStartScale*touchDistance(e.touches[0],e.touches[1])/pinchStartDistance);applyZoom();}else if(e.touches.length===1&&zoomScale>1&&touchGesture){e.preventDefault();zoomX=panOriginX+e.touches[0].clientX-panStartX;zoomY=panOriginY+e.touches[0].clientY-panStartY;applyZoom();}},{passive:false});
+stage.addEventListener('touchend',e=>{if(!e.touches.length){pinchStartDistance=0;stage.classList.remove('zooming');setTimeout(()=>touchGesture=false,80);}},{passive:true});
 stage.addEventListener('dblclick', ()=>{
   toggleFullscreen();
 });
@@ -1489,11 +1506,12 @@ document.getElementById('ctrl-pip').onclick = async ()=>{
     document.getElementById('ctrl-pip').classList.toggle('active', !!document.pictureInPictureElement);
   }catch{ toast('Mini oynatıcı desteklenmiyor'); }
 };
-document.getElementById('ctrl-fs').onclick = ()=> toggleFullscreen();
-function toggleFullscreen(){
-  if(!document.fullscreenElement) pContainer.requestFullscreen().catch(()=>{});
-  else document.exitFullscreen().catch(()=>{});
-}
+document.getElementById('ctrl-fs').onclick=()=>toggleFullscreen();
+document.getElementById('ctrl-zoom-in').onclick=()=>{zoomScale=clampZoom(zoomScale+.25);applyZoom();};
+document.getElementById('ctrl-zoom-out').onclick=()=>{zoomScale=clampZoom(zoomScale-.25);applyZoom();};
+document.getElementById('ctrl-zoom-reset').onclick=resetZoom;
+async function toggleFullscreen(){try{if(!document.fullscreenElement){pContainer.classList.add('mobile-fullscreen');if(pContainer.requestFullscreen)await pContainer.requestFullscreen({navigationUI:'hide'});else if(video.webkitEnterFullscreen)video.webkitEnterFullscreen();if(window.matchMedia('(max-width:1024px)').matches&&screen.orientation?.lock)await screen.orientation.lock('landscape').catch(()=>{});}else await document.exitFullscreen();}catch(e){toast('Tam ekran bu cihazda desteklenmiyor');}}
+document.addEventListener('fullscreenchange',()=>{const on=!!document.fullscreenElement;pContainer.classList.toggle('mobile-fullscreen',on);const b=document.getElementById('ctrl-fs');if(b)b.classList.toggle('active',on);if(!on&&screen.orientation?.unlock)screen.orientation.unlock();});
 document.getElementById('speed-btn').onclick = ()=> document.getElementById('speed-pop').classList.toggle('show');
 document.querySelectorAll('.speed-opt').forEach(opt=>{
   opt.onclick = ()=>{

@@ -240,3 +240,12 @@ Worker’ın mevcut arayüzü HLS playlist içindeki segment URL’lerini yenide
 GitHub Pages statik olduğu için CDN’e özel Referer ve Range başlıkları ekleyemez. `api/media.js`, aynı depoyu Vercel’e deploy ettiğinizde `/api/media?url=...&ref=...` olarak çalışan Serverless proxy’dir. Player, Vercel domaininde otomatik olarak bu endpoint’i kullanır; GitHub Pages’te ise mevcut Worker yedeği kullanılmaya devam eder.
 
 Vercel’de bu repository’yi import edin; framework olarak Vite/Other, build command boş veya `echo done`, output directory `.` seçilebilir. Deploy edilen Vercel URL’sinde player kaynakları otomatik `/api/media` üzerinden akar.
+
+## Mobil player kontrolleri
+
+- Video alanında iki parmakla pinch zoom: 1×–3.5×
+- Zoom sonrası tek parmakla kadrajı sürükleme
+- Player üstündeki `− / ölçek / +` kontrolleri ve tek dokunuşla sıfırlama
+- Mobil tam ekran düğmesi mümkün olan cihazlarda landscape yönünü kilitler
+- Fullscreen modunda player sidebar gizlenir ve video güvenli alanı doldurur
+- iOS gibi yön kilidini desteklemeyen cihazlarda native video fullscreen fallback’i korunur

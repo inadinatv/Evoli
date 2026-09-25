@@ -676,10 +676,26 @@ img{max-width:100%}
 </div>
 
 <script>
-// Media is served by server.py.  Keeping the request on the same origin avoids
-// third-party proxy outages and lets the server add the upstream's required
-// Referer, User-Agent and byte-range headers.
-const MEDIA_PROXY = /^https?:$/.test(location.protocol) ? location.origin : "";
+// Evoli sunucusu varsa aynı-origin uçlarını kullanır. Statik/Worker dağıtımında
+// verilen Cloudflare Worker, `/?url=...&ref=...` biçimindeki byte-range proxy'dir.
+// Worker yalnızca yetkili, herkese açık medya kaynaklarını taşır; DRM veya erişim
+// kontrolü aşılmaz.
+const WORKER_PROXY = "https://evolixx.burhantasci72.workers.dev";
+const LOCAL_HOST = /^(localhost|127\.0\.1|0\.0\.0\.0)$/i.test(location.hostname);
+const HAS_LOCAL_API = /^https?:$/.test(location.protocol) && (LOCAL_HOST || Boolean(window.EVOLI_LOCAL_API));
+const MEDIA_PROXY = HAS_LOCAL_API ? location.origin : WORKER_PROXY;
+const PROXY_MODE = HAS_LOCAL_API ? "server" : "worker";
+function workerUrl(source, ref=""){
+  if(!source || !/^https?:/i.test(source)) return source;
+  const qs = `?url=${encodeURIComponent(source)}${ref ? `&ref=${encodeURIComponent(ref)}` : ""}`;
+  return `${WORKER_PROXY}/${qs}`;
+}
+function proxiedMediaUrl(film, kind){
+  const source = kind === "stream" ? film.stream : film.poster;
+  if(!source) return "";
+  if(PROXY_MODE === "worker") return workerUrl(source, film.ref || film.embed || film.url || "");
+  return film.id ? `${MEDIA_PROXY}/${kind}/${encodeURIComponent(film.id)}` : source;
+}
 const VIDEOS_PER_PAGE = 48;
 const STORAGE_FAV = "evoli_favs_v2";
 const STORAGE_HIST = "evoli_hist_v2";
@@ -693,10 +709,7 @@ let favorites = new Set(), historyMap = {}, menuTab = "all";
 let theater = false, autoHideTimer = null, isDragging = false;
 let nextFilmId = null;
 
-function mediaUrl(film, kind){
-  const source = kind === 'stream' ? film.stream : film.poster;
-  return MEDIA_PROXY && film.id ? `${MEDIA_PROXY}/${kind}/${encodeURIComponent(film.id)}` : source;
-}
+function mediaUrl(film, kind){ return proxiedMediaUrl(film, kind); }
 function posterFallbacks(film){
   return [film.poster, film.poster_alt].filter(u=> u && /^https?:/i.test(u));
 }
@@ -741,12 +754,37 @@ function catIcon(c){
   return map[c]||"•";
 }
 
-/* FETCH */
+/* FETCH — films.json, videos.json veya API benzeri JSON şekillerini kabul et */
+function normaliseFilm(raw, index){
+  raw = raw || {};
+  const sourceValues = [raw.stream, raw.file, raw.src, raw.url_video, raw.video, raw.video_url, raw.videoUrl]
+    .concat(Array.isArray(raw.sources) ? raw.sources : [raw.sources])
+    .map(value => typeof value === "string" ? value : value?.file || value?.src || value?.url || value?.source || "")
+    .filter(value => /^https?:/i.test(value));
+  const sources = [...new Set(sourceValues)];
+  const poster = raw.poster || raw.image || raw.thumbnail || raw.cover || raw.cover_url || "";
+  const posterAlt = raw.poster_alt || raw.posterAlt || raw.thumb || raw.logo || "";
+  return {
+    ...raw,
+    id: String(raw.id ?? raw.video_id ?? raw.videoId ?? index + 1),
+    title: String(raw.title || raw.name || raw.label || `Video ${index + 1}`),
+    stream: sources[0] || "",
+    stream_sources: sources,
+    poster: poster,
+    poster_alt: posterAlt,
+    categories: Array.isArray(raw.categories) ? raw.categories : (raw.category ? [String(raw.category)] : []),
+  };
+}
+function normaliseDb(raw){
+  const list = Array.isArray(raw) ? raw : (raw.films || raw.videos || raw.items || raw.data || []);
+  return { films: list.map(normaliseFilm).filter(f => f.stream || f.url || f.title), categories: raw.categories || {} };
+}
 fetch("films.json?"+Date.now())
   .then(r=>{ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-  .then(db=>{
-    ALL_FILMS = db.films||[];
-    CATEGORIES = db.categories||{};
+  .then(raw=>{
+    const db = normaliseDb(raw);
+    ALL_FILMS = db.films;
+    CATEGORIES = db.categories;
     loadStore();
     init();
   })
@@ -920,8 +958,10 @@ function imgFail(el,direct,alt){
   const chain = [];
   if(direct) chain.push(direct);
   if(alt && alt!==direct) chain.push(alt);
-  if(MEDIA_PROXY && direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(direct)}`);
-  if(MEDIA_PROXY && alt && alt!==direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(alt)}`);
+  if(PROXY_MODE === "worker" && direct) chain.push(workerUrl(direct));
+  else if(MEDIA_PROXY && direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(direct)}`);
+  if(PROXY_MODE === "worker" && alt && alt!==direct) chain.push(workerUrl(alt));
+  else if(MEDIA_PROXY && alt && alt!==direct) chain.push(`${MEDIA_PROXY}/proxy?url=${encodeURIComponent(alt)}`);
   const step = parseInt(el.dataset.fb||"0",10);
   const tried = el.dataset.tried ? el.dataset.tried.split('\u0001') : [];
   const next = chain.find(u=> u && u!==el.src && !tried.includes(u));
@@ -1090,12 +1130,13 @@ function seekTo(percent){
 
 /* --- kaynak yükleme / kurtarma ------------------------------------- */
 function streamSrc(film, attempt){
-  // Son çare: genel /proxy vekili — kaynak çözücü bulamasa bile doğrudan
-  // video adresi (film.stream) gerekli Referer/UA ile akıtılır.
-  if(attempt >= PROXY_ATTEMPT && MEDIA_PROXY && film.stream){
-    const ref = film.ref || film.embed || film.url || '';
-    return `${MEDIA_PROXY}/proxy?url=${encodeURIComponent(film.stream)}&ref=${encodeURIComponent(ref)}`;
-  }
+  // Worker modunda JSON içindeki çoklu kaynaklar sırayla denenir. Yerel
+  // server.py modunda resolver /stream/<id> uç noktası kendi adaylarını seçer.
+  const candidates = [...new Set([...(film.stream_sources || []), film.stream].filter(Boolean))];
+  const source = candidates[Math.min(attempt || 0, Math.max(0, candidates.length - 1))] || film.stream;
+  const ref = film.ref || film.embed || film.url || '';
+  if(PROXY_MODE === "worker" && source) return workerUrl(source, ref);
+  if(attempt >= PROXY_ATTEMPT && source) return `${MEDIA_PROXY}/proxy?url=${encodeURIComponent(source)}&ref=${encodeURIComponent(ref)}`;
   const base = mediaUrl(film, 'stream');
   return attempt ? `${base}?retry=${attempt}&t=${Date.now()}` : base;
 }
@@ -1129,11 +1170,11 @@ function loadHlsJs(){
   // Önce kendi origin'imiz (/hls.js — sunucu kendi yedeklerinden indirir),
   // olmazsa birden fazla CDN: tek bir engelli ağ HLS'i tamamen öldürmesin.
   const HLSJS_SRCS = [
-    `${MEDIA_PROXY}/hls.js`,
+    ...(PROXY_MODE === "server" ? [`${MEDIA_PROXY}/hls.js`] : []),
     'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js',
     'https://unpkg.com/hls.js@1.5.17/dist/hls.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js',
-  ].filter(u=> u && u!=='/hls.js' || MEDIA_PROXY);
+  ].filter(Boolean);
   hlsLoading = new Promise((resolve,reject)=>{
     let i = 0;
     const tryNext = ()=>{
@@ -1199,7 +1240,7 @@ async function handleSourceError(){
     if(!resolving){
       resolving = true;
       try{
-        await fetch(`${MEDIA_PROXY}/api/resolve/${encodeURIComponent(film.id)}?refresh=1`, {cache:'no-store'});
+        if(PROXY_MODE === "server") await fetch(`${MEDIA_PROXY}/api/resolve/${encodeURIComponent(film.id)}?refresh=1`, {cache:'no-store'});
       }catch(e){}
       resolving = false;
     }
@@ -1232,6 +1273,10 @@ async function showVideoError(code, detail){
   box.classList.add('show');
   if(!curFilm) return;
   try{
+    if(PROXY_MODE !== "server"){
+      diag.innerHTML = '<b>Cloudflare Worker proxy kullanılıyor.</b><br>Kaynak yanıt vermiyorsa URL/format bu tarayıcıda desteklenmiyor olabilir.';
+      return;
+    }
     const r = await fetch(`${MEDIA_PROXY}/api/resolve/${encodeURIComponent(curFilm.id)}?refresh=1&debug=1`, {cache:'no-store'});
     const data = await r.json().catch(()=>({}));
     if(data && data.ok){
